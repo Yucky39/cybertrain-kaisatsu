@@ -40,4 +40,6 @@
 
 ## `require "openssl"` を入れたバイナリでは Web サーバーが動かない
 
-`config/app.rb` に `require "openssl"` を足すだけで、アプリのすべてのリクエストが `NoMethodError: undefined method 'getbyte' for an instance of String` で 500 になる(`require "socket"` だけなら 200)。CyberTrain 本体が `openssl` パッケージを避けているのは、このためと思われる。SMTP の TLS には OpenSSL が必要なので、ポスタルのメール送信は、Web とは別のバイナリ(`bin/mail_worker.rb`)に分けた。Web 側は `cybertrain/postal`(OpenSSL を読まない中核部分)のスプールに書くだけ。詳細は Issue #2。本体への報告: https://github.com/saeki-mototsune/CyberTrain/issues/27
+`config/app.rb` に `require "openssl"` を足すだけで、アプリのすべてのリクエストが `NoMethodError: undefined method 'getbyte' for an instance of String` で 500 になる(`require "socket"` だけなら 200)。CyberTrain 本体が `openssl` パッケージを避けているのは、このためと思われる。SMTP の TLS には OpenSSL が必要なので、ポスタルのメール送信は、Web とは別のバイナリ(`bin/mail_worker.rb`)に分けた。Web 側は `cybertrain/postal`(OpenSSL を読まない中核部分)のスプールに書くだけ。詳細は Issue #2。
+
+**原因**(本体の Issue #27 のコメントに、CyberTrain を使わない最小の再現つきで書いた): `openssl` に限らず、Spinel 2026.09.12 では、**どれかのクラスが `getbyte` という名前のメソッドを定義すると、多相の(型が一つに決まらない)受け手への `x.getbyte(i)` が、受け手が `String` のときに `NoMethodError` になる**。組み込みの `String#getbyte` が、ユーザー定義の `getbyte` だけの表に置き換わるように見える。`openssl` パッケージは `OpenSSL::Buffering#getbyte` を定義しているので、読み込むだけで起きる。自前のクラスに `def getbyte` を書いただけ(`openssl` なし、一度もインスタンス化しなくても)でも同じ。受け手が `String` と確定している呼び出しは問題ない。CyberTrain 本体には `getbyte` の呼び出しが 9 ファイル 24 か所ある。他の組み込みメソッド名(`size`、`bytesize` など)で同じことが起きるかは、試していない。本体への報告: https://github.com/saeki-mototsune/CyberTrain/issues/27
