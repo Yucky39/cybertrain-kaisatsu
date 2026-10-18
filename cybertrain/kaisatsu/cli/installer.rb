@@ -16,10 +16,20 @@ module Cybertrain
 
         # dependency: the right-hand side of the spin.toml line, for example
         # `{ path = "/src/cybertrain-kaisatsu" }`.
-        def initialize(root, dependency)
+        POSTAL_REPOSITORY = "https://github.com/Yucky39/cybertrain-postal".freeze
+
+        # postal_dependency: nil for no mail sending (the console notifier), or the
+        # right-hand side of the cybertrain-postal line in spin.toml.
+        def initialize(root, dependency, postal_dependency = nil)
           @root = root
           @dependency = dependency
+          @postal_dependency = postal_dependency
           @log = []
+        end
+
+        def self.postal_dependency_for(path, ref)
+          return %({ path = "#{File.expand_path(path)}" }) unless path.nil?
+          %({ git = "#{POSTAL_REPOSITORY}", ref = "#{ref || "main"}" })
         end
 
         def self.dependency_for(path, git, ref)
@@ -33,6 +43,8 @@ module Cybertrain
           Templates::FILES.each do |path, content|
             write_new(path.sub("%{ts}", stamp), content)
           end
+          write_new("app/models/mail_setup.rb", @postal_dependency ? Templates::MAIL_SETUP_POSTAL : Templates::MAIL_SETUP_CONSOLE)
+          write_new("bin/mail_worker.rb", Templates::MAIL_WORKER) if @postal_dependency
           patch_spin_toml
           patch_config_app
           patch_application_controller
@@ -75,13 +87,20 @@ module Cybertrain
         def patch_spin_toml
           full = path_of("spin.toml")
           text = File.read(full)
-          if text.include?("cybertrain-kaisatsu")
-            @log << "skip   spin.toml (already depends on cybertrain-kaisatsu)"
+          added = []
+          unless text.include?("cybertrain-kaisatsu")
+            added << "cybertrain-kaisatsu = #{@dependency}\n"
+          end
+          if @postal_dependency && !text.include?("cybertrain-postal")
+            added << "cybertrain-postal = #{@postal_dependency}\n"
+          end
+          if added.empty?
+            @log << "skip   spin.toml (dependencies already there)"
             return
           end
           text += "\n" unless text.end_with?("\n")
           text += "[dependencies]\n" unless text.include?("[dependencies]")
-          text += "cybertrain-kaisatsu = #{@dependency}\n"
+          text += added.join
           File.write(full, text)
           @log << "update spin.toml"
         end
@@ -89,11 +108,16 @@ module Cybertrain
         def patch_config_app
           full = path_of("config/app.rb")
           text = File.read(full)
-          if text.include?("cybertrain/kaisatsu")
-            @log << "skip   config/app.rb (already requires kaisatsu)"
+          additions = +""
+          additions << Templates::REQUIRE_LINE unless text.include?("cybertrain/kaisatsu")
+          if @postal_dependency && !text.include?("cybertrain/postal")
+            additions << Templates::POSTAL_REQUIRES
+          end
+          if additions.empty?
+            @log << "skip   config/app.rb (already requires what it needs)"
             return
           end
-          File.write(full, Templates::REQUIRE_LINE + "\n" + text)
+          File.write(full, additions + "\n" + text)
           @log << "update config/app.rb"
         end
 
