@@ -1,0 +1,9 @@
+ok   a request for an unconfirmed account sends the link to that address
+ok   an unknown account, and one that is already confirmed, get no mail
+ok   opening the link does not confirm; the button does, once
+ok   the link expires after three days
+ok   a forged or empty token confirms nothing
+ok   a reset token cannot confirm an address, nor the other way round
+ok   a newer link voids the older one
+ok   requests are limited per account and recover after the window
+8 tests, 24 assertions, 0 failures

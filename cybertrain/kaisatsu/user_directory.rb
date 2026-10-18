@@ -30,6 +30,17 @@ module Cybertrain
         ""
       end
 
+      # Whether the account's e-mail address has been confirmed. Mail that
+      # carries a secret (a password reset link) goes only to confirmed addresses.
+      def email_verified?(user_id)
+        false
+      end
+
+      # Records that the address was confirmed (by a click on the mailed link).
+      def mark_email_verified(user_id)
+        nil
+      end
+
       # Stores a replacement password hash (rehash on sign-in, reset).
       def store_password_hash(user_id, password_hash)
         nil
