@@ -1,0 +1,72 @@
+#!/usr/bin/env ruby
+# CRuby-only check of `kaisatsu install` (the generator is not compiled by Spinel,
+# so it is not part of `spin test`). Builds a minimal application directory in a
+# temporary directory, installs twice, and checks what was written.
+$LOAD_PATH.unshift(File.expand_path("..", __dir__))
+require "tmpdir"
+require "fileutils"
+require "cybertrain/kaisatsu/cli"
+
+$failures = 0
+def check(name, ok)
+  puts "#{ok ? "ok  " : "FAIL"} #{name}"
+  $failures += 1 unless ok
+end
+
+Dir.mktmpdir do |root|
+  FileUtils.mkdir_p(File.join(root, "app/controllers"))
+  FileUtils.mkdir_p(File.join(root, "config"))
+  File.write(File.join(root, "spin.toml"), %([package]\nname = "demo"\n\n[dependencies]\ncybertrain = { path = "/x" }\n))
+  File.write(File.join(root, "config/app.rb"), "Cybertrain.configure do |c|\nend\n")
+  File.write(File.join(root, "config/routes.rb"), %(Cybertrain::Routes.draw do\n  root "home#index"\nend\n))
+  File.write(File.join(root, "app/controllers/application_controller.rb"), <<~RUBY)
+    class ApplicationController < Cybertrain::Controller
+      rescue_from Cybertrain::RecordNotFound, with: :record_not_found
+
+      private
+
+      def record_not_found
+        render plain: "Not Found", status: :not_found
+      end
+    end
+  RUBY
+
+  dep = Cybertrain::Kaisatsu::CLI::Installer.dependency_for("/src/kaisatsu", nil, nil)
+  first = Cybertrain::Kaisatsu::CLI::Installer.new(root, dep).run
+  second = Cybertrain::Kaisatsu::CLI::Installer.new(root, dep).run
+  read = ->(f) { File.read(File.join(root, f)) }
+
+  check "first run creates the migrations, model, controllers and views",
+        first.count { |l| l.start_with?("create") } == 8
+  check "second run changes nothing", second.none? { |l| l.start_with?("create", "update") }
+  check "migrations sort users before the Kaisatsu tables",
+        Dir.glob(File.join(root, "db/migrate/*")).sort.map { |f| File.basename(f).sub(/\A\d+_/, "") } ==
+        %w[create_users.rb create_kaisatsu_tables.rb]
+  check "spin.toml gets the dependency once", read.("spin.toml").scan("cybertrain-kaisatsu").size == 1 &&
+        read.("spin.toml").include?(%(path = "/src/kaisatsu"))
+  check "config/app.rb requires kaisatsu first", read.("config/app.rb").start_with?(%(require "cybertrain/kaisatsu/full"))
+  controller = read.("app/controllers/application_controller.rb")
+  check "ApplicationController gets the before_action", controller.scan("Gate.resolve").size == 1
+  check "ApplicationController keeps its own private methods and gains the helpers",
+        controller.include?("def record_not_found") && controller.include?("def require_login") &&
+        controller.scan(/^  private$/).size == 1
+  routes = read.("config/routes.rb")
+  check "routes keep the root and gain five named routes",
+        routes.include?(%(root "home#index")) && routes.scan(/as: "/).size == 5 && routes.rstrip.end_with?("end")
+  check "generated Ruby parses", Dir.glob(File.join(root, "{app,db,config}/**/*.rb")).all? do |f|
+    system(RbConfig.ruby, "-c", f, out: File::NULL, err: File::NULL)
+  end
+
+  missing = Dir.mktmpdir do |empty|
+    begin
+      Cybertrain::Kaisatsu::CLI::Installer.new(empty, dep).run
+      false
+    rescue ArgumentError
+      true
+    end
+  end
+  check "refuses a directory that is not a cybertrain application", missing
+end
+
+puts $failures.zero? ? "all checks passed" : "#{$failures} failed"
+exit($failures.zero? ? 0 : 1)

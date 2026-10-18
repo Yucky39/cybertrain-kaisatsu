@@ -15,22 +15,29 @@ module Cybertrain
       UID_KEY = "_kaisatsu_uid"
 
       def call(ctx)
+        Gate.resolve(ctx)
+        super
+      end
+
+      # The work of the middleware, callable on its own: a controller's
+      # before_action can run it where the stack cannot be changed
+      # (`before_action { |c| Cybertrain::Kaisatsu::Gate.resolve(c.ctx) }`).
+      def self.resolve(ctx)
         session = ctx.session
-        unless session.nil?
-          sid = session[SID_KEY]
-          if sid.nil? || sid.empty?
+        return nil if session.nil?
+        sid = session[SID_KEY]
+        if sid.nil? || sid.empty?
+          session.delete(UID_KEY)
+        else
+          uid = DB.with { |conn| ServerSessions.resolve_user(conn, sid, Time.now.to_i) }
+          if uid.empty?
+            session.delete(SID_KEY)
             session.delete(UID_KEY)
           else
-            uid = DB.with { |conn| ServerSessions.resolve_user(conn, sid, Time.now.to_i) }
-            if uid.empty?
-              session.delete(SID_KEY)
-              session.delete(UID_KEY)
-            else
-              session[UID_KEY] = uid
-            end
+            session[UID_KEY] = uid
           end
         end
-        super
+        nil
       end
 
       # "" when nobody is signed in.
