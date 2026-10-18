@@ -27,7 +27,8 @@
   - 再現: `spikes/m2_cvar_gc_repro.rb`(改札のコードを使わず、本体の `Router` と自前の `@@cases` だけで出る)。`@@cases` をモジュールレベルのインスタンス変数 `@cases` に替えると消える。
   - 影響範囲: CyberTrain 本体で `@@` を代入しているのは `cybertrain/test.rb`(テストハーネス)だけ。実行時のフレームワークは影響を受けない。改札のライブラリ本体は `@@` を使っていない。
   - 対応: 改札のテストハーネスはクラス変数をやめ、定数が持つ 1 つのオブジェクトに状態を置いた。本体の `cybertrain/test.rb` は本体側で直す必要がある(下記)。ポスタルのハーネスも同じ書き方なので、同様に直すこと。
-  - 本体への報告案: 「`test.rb` の `@@cases` などを、規則 18 の推奨どおりモジュールレベルの `@` 変数かオブジェクトに替える」。大量に割り当てる処理(パスワードハッシュなど)を起動時に行うテストで出る。
+  - 本体への報告: https://github.com/saeki-mototsune/CyberTrain/issues/26
+  - 本体への報告案(参考): 「`test.rb` の `@@cases` などを、規則 18 の推奨どおりモジュールレベルの `@` 変数かオブジェクトに替える」。大量に割り当てる処理(パスワードハッシュなど)を起動時に行うテストで出る。
 - ルートのブロックの中で `DB.with` を呼ばず、通常のメソッドから呼ぶ(`spikes/NOTES.md` 規則 32・45)。
 - `Authenticator.new(directory)` の引数は、あらかじめ変数か定数に束縛しておく(規則 58)。
 
@@ -39,4 +40,4 @@
 
 ## `require "openssl"` を入れたバイナリでは Web サーバーが動かない
 
-`config/app.rb` に `require "openssl"` を足すだけで、アプリのすべてのリクエストが `NoMethodError: undefined method 'getbyte' for an instance of String` で 500 になる(`require "socket"` だけなら 200)。CyberTrain 本体が `openssl` パッケージを避けているのは、このためと思われる。SMTP の TLS には OpenSSL が必要なので、ポスタルのメール送信は、Web とは別のバイナリ(`bin/mail_worker.rb`)に分けた。Web 側は `cybertrain/postal`(OpenSSL を読まない中核部分)のスプールに書くだけ。詳細は Issue #2。
+`config/app.rb` に `require "openssl"` を足すだけで、アプリのすべてのリクエストが `NoMethodError: undefined method 'getbyte' for an instance of String` で 500 になる(`require "socket"` だけなら 200)。CyberTrain 本体が `openssl` パッケージを避けているのは、このためと思われる。SMTP の TLS には OpenSSL が必要なので、ポスタルのメール送信は、Web とは別のバイナリ(`bin/mail_worker.rb`)に分けた。Web 側は `cybertrain/postal`(OpenSSL を読まない中核部分)のスプールに書くだけ。詳細は Issue #2。本体への報告: https://github.com/saeki-mototsune/CyberTrain/issues/27

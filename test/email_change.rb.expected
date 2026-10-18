@@ -1,0 +1,12 @@
+ok   a request mails a link to the NEW address and a notice to the old one
+ok   the address changes only when the button is pressed, once
+ok   the new address signs in and the old one no longer does
+ok   changing the address ends every session and voids older links
+ok   a wrong password changes nothing, sends nothing, and counts against sign-in
+ok   an address that is already taken looks exactly like success, and mails nothing
+ok   if the address is taken before the button is pressed, nothing changes
+ok   malformed or unchanged addresses are refused before the password is asked for
+ok   the old address is told only if it had been confirmed
+ok   the link expires after a day, and a newer request voids the older link
+ok   a forged token, or a verification token, changes nothing
+11 tests, 43 assertions, 0 failures
