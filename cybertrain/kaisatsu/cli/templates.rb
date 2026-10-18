@@ -66,6 +66,16 @@ module Cybertrain
             EOS_KAISATSU
           ],
           [
+            "db/migrate/%{ts}03_add_pending_email_to_users.rb",
+            <<~'EOS_KAISATSU'
+              class AddPendingEmailToUsers < Cybertrain::Migration::Base
+                def change
+                  add_column "users", "pending_email", :string
+                end
+              end
+            EOS_KAISATSU
+          ],
+          [
             "app/models/user.rb",
             <<~'EOS_KAISATSU'
               # Columns come from gen/models/user.rb (generated from db/schema.rb).
@@ -104,6 +114,39 @@ module Cybertrain
                   nil
                 end
 
+                def email_taken?(email, except_user_id)
+                  other = User.where(email: email).first
+                  !other.nil? && other.id.to_s != except_user_id
+                end
+
+                def begin_email_change(user_id, new_email)
+                  user = User.find_by(id: user_id.to_i)
+                  return nil if user.nil?
+                  user.pending_email = new_email
+                  user.save
+                  nil
+                end
+
+                def pending_email(user_id)
+                  user = User.find_by(id: user_id.to_i)
+                  user.nil? ? "" : user.pending_email.to_s
+                end
+
+                # The unique index on users.email is the last word: if the address was
+                # taken in the meantime, the save fails and nothing changes.
+                def apply_email_change(user_id)
+                  user = User.find_by(id: user_id.to_i)
+                  return false if user.nil?
+                  pending = user.pending_email.to_s
+                  return false if pending.empty? || email_taken?(pending, user_id)
+                  user.email = pending
+                  user.pending_email = ""
+                  user.email_verified_at = Time.now.to_i
+                  user.save
+                rescue Cybertrain::DB::Error
+                  false
+                end
+
                 def store_password_hash(user_id, password_hash)
                   user = User.find_by(id: user_id.to_i)
                   return nil if user.nil?
@@ -129,11 +172,38 @@ module Cybertrain
                   spawn_verification(@inner, email, link)
                 end
 
+                def send_email_change_link(new_email, link)
+                  spawn_change_link(@inner, new_email, link)
+                end
+
+                def send_email_change_requested(old_email, new_email)
+                  spawn_change_requested(@inner, old_email, new_email)
+                end
+
+                def send_email_changed(old_email, new_email)
+                  spawn_changed_notice(@inner, old_email, new_email)
+                end
+
                 def send_password_changed(email)
                   spawn_changed(@inner, email)
                 end
 
                 private
+
+                def spawn_change_link(inner, new_email, link)
+                  Thread.new { inner.send_email_change_link(new_email, link) }
+                  nil
+                end
+
+                def spawn_change_requested(inner, old_email, new_email)
+                  Thread.new { inner.send_email_change_requested(old_email, new_email) }
+                  nil
+                end
+
+                def spawn_changed_notice(inner, old_email, new_email)
+                  Thread.new { inner.send_email_changed(old_email, new_email) }
+                  nil
+                end
 
                 def spawn_verification(inner, email, link)
                   Thread.new { inner.send_email_verification(email, link) }
@@ -157,6 +227,7 @@ module Cybertrain
                 @authenticator = nil
                 @password_reset = nil
                 @email_verification = nil
+                @email_change = nil
 
                 def self.authenticator
                   built = @authenticator
@@ -185,6 +256,18 @@ module Cybertrain
                 # hold back a feature until it is).
                 def self.email_verified?(user_id)
                   AccountDirectory.new.email_verified?(user_id)
+                end
+
+                def self.email_change
+                  built = @email_change
+                  if built.nil?
+                    directory = AccountDirectory.new
+                    inner = notifier
+                    mailer = BackgroundNotifier.new(inner)
+                    built = Cybertrain::Kaisatsu::EmailChange.new(directory, mailer, base_url)
+                    @email_change = built
+                  end
+                  built
                 end
 
                 def self.email_verification
@@ -557,6 +640,121 @@ module Cybertrain
                 </div>
               <% end %>
             EOS_KAISATSU
+          ],
+          [
+            "app/controllers/email_changes_controller.rb",
+            <<~'EOS_KAISATSU'
+              class EmailChangesController < ApplicationController
+                before_action :require_login, only: [:new_action, :create]
+
+                # GET /account/email
+                def new_action
+                end
+
+                # POST /account/email
+                # Nothing changes yet: a link goes to the new address. The answer does not say
+                # whether the address is already in use.
+                def create
+                  outcome = ask_for_change(current_user_id, params[:email].to_s, params[:password].to_s)
+                  if outcome.accepted?
+                    flash[:notice] = "If that address can be used, we sent a link to it. The change takes effect when you confirm."
+                    redirect_to "/", status: :see_other
+                  elsif outcome.status == "throttled"
+                    flash.now[:alert] = "Too many attempts. Try again later."
+                    render :new_action, status: 429
+                  elsif outcome.status == "wrong_password"
+                    flash.now[:alert] = "The password is not correct."
+                    render :new_action, status: :unprocessable_entity
+                  else
+                    flash.now[:alert] = "Enter a different, valid email address."
+                    render :new_action, status: :unprocessable_entity
+                  end
+                end
+
+                # GET /email/change/:token
+                # Opening the link only shows a button.
+                def edit
+                  @token = params[:token].to_s
+                  unless token_still_valid?(@token)
+                    flash[:alert] = "That link is invalid or has expired."
+                    return redirect_to("/login", status: :see_other)
+                  end
+                  response.set_header("Referrer-Policy", "no-referrer")
+                end
+
+                # POST /email/change
+                def update
+                  outcome = confirm(params[:token].to_s)
+                  if outcome.done?
+                    flash[:notice] = "Your email address was changed. Please sign in with the new address."
+                  elsif outcome.status == "taken"
+                    flash[:alert] = "That address is now used by another account, so nothing was changed."
+                  else
+                    flash[:alert] = "That link is invalid or has expired."
+                  end
+                  redirect_to "/login", status: :see_other
+                end
+
+                private
+
+                # Everything a DB.with block needs is a local first: inside the block `self`
+                # is not the controller under Spinel.
+                def ask_for_change(user_id, new_email, password)
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_change.request_change(conn, user_id, new_email, password, now)
+                  end
+                end
+
+                def token_still_valid?(token)
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_change.token_valid?(conn, token, now)
+                  end
+                end
+
+                def confirm(token)
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_change.complete_change(conn, token, now)
+                  end
+                end
+              end
+            EOS_KAISATSU
+          ],
+          [
+            "app/views/email_changes/new_action.html.erb",
+            <<~'EOS_KAISATSU'
+              <h1>Change your email address</h1>
+              <p>We will send a link to the new address. The change takes effect when you confirm it there.</p>
+              <%= form_with(url: "/account/email") do |f| %>
+                <div class="field">
+                  <%= f.label :email, "New email address" %>
+                  <%= f.email_field :email, autocomplete: "email" %>
+                </div>
+                <div class="field">
+                  <%= f.label :password, "Your current password" %>
+                  <%= f.password_field :password, autocomplete: "current-password" %>
+                </div>
+                <div class="actions">
+                  <%= f.submit "Send the link" %>
+                </div>
+              <% end %>
+              <p><a href="/">Back</a></p>
+            EOS_KAISATSU
+          ],
+          [
+            "app/views/email_changes/edit.html.erb",
+            <<~'EOS_KAISATSU'
+              <h1>Confirm your new email address</h1>
+              <p>Press the button to use this address to sign in. Every signed-in session will end.</p>
+              <%= form_with(url: "/email/change") do |f| %>
+                <%= f.hidden_field :token, value: @token %>
+                <div class="actions">
+                  <%= f.submit "Confirm" %>
+                </div>
+              <% end %>
+            EOS_KAISATSU
           ]
         ].freeze
 
@@ -610,6 +808,28 @@ module Cybertrain
                            "Open this link and press the button within three days:\n\n" +
                            link + "\n\n" \
                            "If you did not create an account, ignore this mail.\n")
+            end
+
+            def send_email_change_link(new_email, link)
+              enqueue_text(new_email, "Confirm your new email address",
+                           "Someone asked to use this address to sign in to the account.\n\n" \
+                           "Open this link and press the button within a day to confirm:\n\n" +
+                           link + "\n\n" \
+                           "If it was not you, ignore this mail: nothing changes until you confirm.\n")
+            end
+
+            def send_email_change_requested(old_email, new_email)
+              enqueue_text(old_email, "A change of your sign-in address was requested",
+                           "A change of the sign-in address of this account to another address " \
+                           "was requested. It takes effect only when the new address is confirmed.\n\n" \
+                           "If it was not you, change your password now.\n")
+            end
+
+            def send_email_changed(old_email, new_email)
+              enqueue_text(old_email, "Your sign-in address was changed",
+                           "The sign-in address of this account was changed to another address, " \
+                           "and every signed-in session was ended.\n\n" \
+                           "If it was not you, contact the administrator at once.\n")
             end
 
             def send_password_changed(email)
@@ -763,6 +983,10 @@ module Cybertrain
           post "/email/resend", to: "email_verifications#create", as: "create_resend_verification"
           get "/email/verify/:token", to: "email_verifications#edit", as: "verify_email"
           post "/email/verify", to: "email_verifications#update", as: "update_verify_email"
+          get "/account/email", to: "email_changes#new_action", as: "change_email"
+          post "/account/email", to: "email_changes#create", as: "create_change_email"
+          get "/email/change/:token", to: "email_changes#edit", as: "confirm_email_change"
+          post "/email/change", to: "email_changes#update", as: "update_email_change"
         EOS_KAISATSU
 
         REQUIRE_LINE = %(require "cybertrain/kaisatsu/full"\n).freeze

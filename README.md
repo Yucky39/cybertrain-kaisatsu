@@ -8,6 +8,7 @@ Status: pre-alpha. See [docs/design.md](docs/design.md) and [docs/install.md](do
 - Server-side sessions: the cookie holds only a random id; ending a session takes effect at once.
 - One-time tokens (password reset, e-mail confirmation): digest-only storage, single-use, expiring.
 - Sign-in throttling in the database, same answer for a wrong password and an unknown account.
+- Changing the sign-in address: password required, a link to the new address, a notice to the old one, every session and outstanding link ended on success.
 - E-mail confirmation (the link only shows a button; opening it confirms nothing) — reset links go only to confirmed addresses.
 - Password reset by e-mail: one-time link, throttled requests, same answer for any address; mail goes out over cybertrain-postal through a spool and a separate worker (`--postal`).
 - `kaisatsu install` adds all of it to a cybertrain application.

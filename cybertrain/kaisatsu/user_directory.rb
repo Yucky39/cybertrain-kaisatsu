@@ -41,6 +41,28 @@ module Cybertrain
         nil
       end
 
+      # Whether another account already uses the address.
+      def email_taken?(email, except_user_id)
+        false
+      end
+
+      # Remembers the address a user asked to change to, until it is confirmed.
+      def begin_email_change(user_id, new_email)
+        nil
+      end
+
+      # The address waiting to be confirmed ("" when none).
+      def pending_email(user_id)
+        ""
+      end
+
+      # Makes the pending address the account's address, confirmed, and clears
+      # the pending one. Returns false when it cannot be applied (the address was
+      # taken in the meantime, or nothing was pending).
+      def apply_email_change(user_id)
+        false
+      end
+
       # Stores a replacement password hash (rehash on sign-in, reset).
       def store_password_hash(user_id, password_hash)
         nil
