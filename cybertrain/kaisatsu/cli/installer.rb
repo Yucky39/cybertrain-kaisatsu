@@ -120,11 +120,14 @@ module Cybertrain
           @log << "update app/controllers/application_controller.rb"
         end
 
+        # Adds each route that is not there yet, so an application installed by an
+        # earlier version gains the newer routes on a second run.
         def patch_routes
           full = path_of("config/routes.rb")
           text = File.read(full)
-          if text.include?('"sessions#new_action"')
-            @log << "skip   config/routes.rb (already has the sign-in routes)"
+          missing = Templates::ROUTES.lines.reject { |line| text.include?(line.strip) }
+          if missing.empty?
+            @log << "skip   config/routes.rb (already has the routes)"
             return
           end
           unless text.match?(/^end\s*\z/)
@@ -132,7 +135,8 @@ module Cybertrain
             return
           end
           separator = text.match?(/^  \S/) ? "\n" : ""
-          text = text.sub(/^end\s*\z/) { separator + indent(Templates::ROUTES) + "end\n" }
+          addition = indent(missing.join)
+          text = text.sub(/^end\s*\z/) { separator + addition + "end\n" }
           File.write(full, text)
           @log << "update config/routes.rb"
         end

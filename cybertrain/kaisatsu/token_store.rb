@@ -36,6 +36,19 @@ module Cybertrain
         rows.empty? ? "" : rows[0]["user_id"].to_s
       end
 
+      # The user id a token would belong to, without spending it ("" when it
+      # is unknown, of another purpose, expired or already used). For showing
+      # the "choose a new password" form before the token is used.
+      def self.peek_token(conn, raw, purpose, now)
+        return "" if raw.bytesize != Token::BYTES * 2
+        rows = conn.execute(
+          "SELECT user_id FROM kaisatsu_tokens WHERE digest = ? AND purpose = ? " \
+          "AND used_at IS NULL AND expires_at > ?",
+          [Token.digest_of(raw), purpose, now]
+        )
+        rows.empty? ? "" : rows[0]["user_id"].to_s
+      end
+
       def self.purge_expired_tokens(conn, now)
         conn.execute("DELETE FROM kaisatsu_tokens WHERE expires_at <= ? OR used_at IS NOT NULL", [now])
         nil

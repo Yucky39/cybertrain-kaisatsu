@@ -24,6 +24,12 @@ module Cybertrain
         Credentials.missing
       end
 
+      # The e-mail address of an account ("" when unknown), for notices that
+      # follow an action (a password was changed).
+      def email_for(user_id)
+        ""
+      end
+
       # Stores a replacement password hash (rehash on sign-in, reset).
       def store_password_hash(user_id, password_hash)
         nil
