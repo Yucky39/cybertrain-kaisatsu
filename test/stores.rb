@@ -111,8 +111,8 @@ end
 test "throttle keys are stored as digests" do
   conn = fresh_conn
   K::Throttle.note_failure(conn, "account:a@example.com", 1000, 900)
-  rows = conn.execute("SELECT key FROM kaisatsu_attempts")
-  refute rows[0]["key"].include?("example")
+  rows = conn.execute("SELECT bucket FROM kaisatsu_attempts")
+  refute rows[0]["bucket"].include?("example")
   conn.close
 end
 

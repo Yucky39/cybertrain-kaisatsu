@@ -1,0 +1,5 @@
+#!/usr/bin/env ruby
+# The `kaisatsu` command. Runs under CRuby.
+$LOAD_PATH.unshift(File.expand_path("..", __dir__))
+require "cybertrain/kaisatsu/cli"
+exit(Cybertrain::Kaisatsu::CLI.run(ARGV))

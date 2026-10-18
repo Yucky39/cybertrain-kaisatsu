@@ -14,7 +14,7 @@ module Cybertrain
       # True when the key already has `limit` failures inside the window.
       def self.blocked?(conn, key, now, limit, window)
         rows = conn.execute(
-          "SELECT window_start, failures FROM kaisatsu_attempts WHERE key = ?",
+          "SELECT window_start, failures FROM kaisatsu_attempts WHERE bucket = ?",
           [key_digest(key)]
         )
         return false if rows.empty?
@@ -24,8 +24,8 @@ module Cybertrain
 
       def self.note_failure(conn, key, now, window)
         conn.execute(
-          "INSERT INTO kaisatsu_attempts (key, window_start, failures) VALUES (?, ?, 1) " \
-          "ON CONFLICT(key) DO UPDATE SET " \
+          "INSERT INTO kaisatsu_attempts (bucket, window_start, failures) VALUES (?, ?, 1) " \
+          "ON CONFLICT(bucket) DO UPDATE SET " \
           "failures = CASE WHEN ? - window_start >= ? THEN 1 ELSE failures + 1 END, " \
           "window_start = CASE WHEN ? - window_start >= ? THEN ? ELSE window_start END",
           [key_digest(key), now, now, window, now, window, now]
@@ -34,7 +34,7 @@ module Cybertrain
       end
 
       def self.clear(conn, key)
-        conn.execute("DELETE FROM kaisatsu_attempts WHERE key = ?", [key_digest(key)])
+        conn.execute("DELETE FROM kaisatsu_attempts WHERE bucket = ?", [key_digest(key)])
         nil
       end
     end
