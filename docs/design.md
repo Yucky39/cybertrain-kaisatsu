@@ -71,7 +71,7 @@ SMTP ライブラリ(ポスタル)は別リポジトリ(cybertrain-postal)で扱
 
 ## 8. 未決事項
 
-1. パスワードハッシュ方針(§4 の A / B)。M0 の実測後に決める。
+1. パスワードハッシュ方針: A(Ruby の PBKDF2)を採用(決定済み。`docs/m0-findings.md` 参照)。
 2. 別セッションで決めた用語・API があれば反映する(本書の命名は仮)。
-3. ライセンス。CyberTrain 本体は MIT。
-4. GitHub リポジトリ(Yucky39/cybertrain-kaisatsu)はまだ無い。ローカルのみ `git init` 済み。
+3. ライセンス: MIT(決定済み)。
+4. GitHub リポジトリ: 作成済み(Yucky39/cybertrain-kaisatsu)。

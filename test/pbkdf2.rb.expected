@@ -1,0 +1,5 @@
+ok   one iteration matches the known answer
+ok   two iterations match the known answer
+ok   4096 iterations match the known answer
+ok   a password longer than the block size is hashed down first
+4 tests, 5 assertions, 0 failures
