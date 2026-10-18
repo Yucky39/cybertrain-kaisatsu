@@ -135,11 +135,9 @@ module Cybertrain
                   built
                 end
 
-                # The mail sender. ConsoleNotifier prints the link to the log: development
-                # only. Replace it with a Notifier that sends mail (for example over
-                # cybertrain-postal) before going live.
+                # The mail sender, chosen in app/models/mail_setup.rb.
                 def self.notifier
-                  Cybertrain::Kaisatsu::ConsoleNotifier.new
+                  MailSetup.notifier
                 end
 
                 # Where reset links point. Set KAISATSU_BASE_URL in production
@@ -401,6 +399,165 @@ module Cybertrain
             EOS_KAISATSU
           ]
         ].freeze
+
+        MAIL_SETUP_CONSOLE = <<~'EOS_KAISATSU'.freeze
+          # Which Notifier sends Kaisatsu's mail. This one prints to the log, which is
+          # for development only: a reset link is a secret. Reinstall with --postal to
+          # send real mail over cybertrain-postal (delete this file first), or write
+          # your own Cybertrain::Kaisatsu::Notifier here.
+          module MailSetup
+            def self.notifier
+              Cybertrain::Kaisatsu::ConsoleNotifier.new
+            end
+          end
+        EOS_KAISATSU
+
+        MAIL_SETUP_POSTAL = <<~'EOS_KAISATSU'.freeze
+          # Queues Kaisatsu's mail for cybertrain-postal. The web binary only writes the
+          # message to a spool directory (a file per message); bin/mail_worker.rb, a
+          # separate program, sends them. They are separate because a binary that links
+          # OpenSSL (needed for SMTP over TLS) cannot also run the CyberTrain web server
+          # at this Spinel release: every request fails with "undefined method 'getbyte'".
+          #
+          # Web settings (environment):
+          #
+          #   KAISATSU_MAIL_FROM       the sender address; when empty, mail is only printed
+          #                            to the log (development)
+          #   KAISATSU_MAIL_FROM_NAME  optional display name
+          #   KAISATSU_MAIL_SPOOL      the spool directory (default storage/mail_spool);
+          #                            the worker must be given the same one
+          #
+          # SMTP settings belong to the worker; see bin/mail_worker.rb. Nothing about the
+          # recipient or the link is written to the log.
+          class PostalNotifier < Cybertrain::Kaisatsu::Notifier
+            def initialize(delivery, from_address, from_name)
+              @delivery = delivery
+              @from_address = from_address
+              @from_name = from_name
+            end
+
+            def send_password_reset(email, link)
+              enqueue_text(email, "Reset your password",
+                           "Someone asked to reset the password for this account.\n\n" \
+                           "Open this link within one hour to choose a new password:\n\n" +
+                           link + "\n\n" \
+                           "If it was not you, ignore this mail: your password stays the same.\n")
+            end
+
+            def send_password_changed(email)
+              enqueue_text(email, "Your password was changed",
+                           "The password for this account was just changed, and every signed-in " \
+                           "session was ended.\n\n" \
+                           "If it was not you, reset the password now and check your account.\n")
+            end
+
+            private
+
+            def enqueue_text(to, subject, body)
+              sender = Cybertrain::Postal::Address.build(@from_address, @from_name)
+              message = Cybertrain::Postal::Message.new(sender)
+              message.add_to(Cybertrain::Postal::Address.build(to, ""))
+              message.subject = subject
+              message.text_body = body
+              result = @delivery.deliver(message)
+              puts "[kaisatsu] mail not queued (code #{result.code})" unless result.ok?
+              nil
+            rescue Cybertrain::Postal::InvalidMessage
+              puts "[kaisatsu] mail not queued (the message was refused as invalid)"
+              nil
+            end
+          end
+
+          module MailSetup
+            def self.notifier
+              from = ENV["KAISATSU_MAIL_FROM"]
+              return Cybertrain::Kaisatsu::ConsoleNotifier.new if from.nil? || from.empty?
+
+              name = ENV["KAISATSU_MAIL_FROM_NAME"]
+              dir = ENV["KAISATSU_MAIL_SPOOL"]
+              spool = Cybertrain::Postal::Spool.new(dir.nil? || dir.empty? ? "storage/mail_spool" : dir)
+              delivery = Cybertrain::Postal::QueueDelivery.new(spool)
+              PostalNotifier.new(delivery, from, name.nil? ? "" : name)
+            end
+          end
+        EOS_KAISATSU
+
+        MAIL_WORKER = <<~'EOS_KAISATSU'.freeze
+          # Sends the mail that the web application queued (see app/models/mail_setup.rb).
+          # A separate program on purpose: it links OpenSSL for SMTP over TLS, which the
+          # web binary cannot.
+          #
+          #   cybertrain spin run mail_worker            run until stopped
+          #   cybertrain spin run mail_worker -- --once  one pass, then exit
+          #
+          # Settings (environment):
+          #
+          #   KAISATSU_SMTP_HOST       the SMTP server (required)
+          #   KAISATSU_SMTP_PORT       587 by default
+          #   KAISATSU_SMTP_TLS        unset: STARTTLS is required, and never downgraded to
+          #                            plain text if it fails
+          #                            "implicit": TLS from the start (port 465)
+          #                            "optional": STARTTLS when offered, plain text otherwise;
+          #                            for a relay on the same machine (a mail catcher in
+          #                            development). The password is only ever sent over
+          #                            TLS or to a loopback address.
+          #   KAISATSU_SMTP_USER / KAISATSU_SMTP_PASSWORD
+          #   KAISATSU_HELO            the name given in EHLO (default localhost)
+          #   KAISATSU_MAIL_SPOOL      the spool directory (default storage/mail_spool)
+          #
+          # On macOS with Homebrew, build with
+          #   export LIBRARY_PATH=$(brew --prefix openssl@3)/lib CPATH=$(brew --prefix openssl@3)/include
+          require "cybertrain/postal"
+          require "cybertrain/postal/smtp_factory"
+
+          def setting(name, fallback)
+            value = ENV[name]
+            value.nil? || value.empty? ? fallback : value
+          end
+
+          host = setting("KAISATSU_SMTP_HOST", "")
+          if host.empty?
+            puts "mail_worker: KAISATSU_SMTP_HOST is not set"
+            exit(1)
+          end
+
+          tls = setting("KAISATSU_SMTP_TLS", "")
+          factory = Cybertrain::Postal::SmtpDeliveryFactory.new(
+            host,
+            setting("KAISATSU_SMTP_PORT", "587").to_i,
+            tls == "implicit",
+            setting("KAISATSU_HELO", "localhost")
+          )
+          factory.require_tls = false if tls == "optional"
+          user = setting("KAISATSU_SMTP_USER", "")
+          factory.credentials(user, setting("KAISATSU_SMTP_PASSWORD", "")) unless user.empty?
+
+          spool = Cybertrain::Postal::Spool.new(setting("KAISATSU_MAIL_SPOOL", "storage/mail_spool"))
+          policy = Cybertrain::Postal::RetryPolicy.new(8, 30.0, 3600.0)
+          runner = Cybertrain::Postal::SpoolRunner.new(spool, factory, policy)
+          once = ARGV.include?("--once")
+
+          running = true
+          while running
+            now = Time.now.to_i
+            spool.recover_stale(now, 600)
+            report = runner.run_once(now)
+            if report.delivered + report.deferred + report.failed > 0
+              puts "[mail_worker] delivered=#{report.delivered} deferred=#{report.deferred} failed=#{report.failed}"
+              STDOUT.flush
+            end
+            if once
+              running = false
+            else
+              sleep(5)
+            end
+          end
+        EOS_KAISATSU
+
+        # Only the core of postal: it does not pull in OpenSSL (see MAIL_SETUP_POSTAL).
+        POSTAL_REQUIRES = <<~'EOS_KAISATSU'.freeze
+          require "cybertrain/postal"
+        EOS_KAISATSU
 
         APPLICATION_CONTROLLER_BEFORE_ACTION = <<~'EOS_KAISATSU'.freeze
           # Kaisatsu: check the session id against the database on every request.

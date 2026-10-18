@@ -37,7 +37,7 @@ Dir.mktmpdir do |root|
   read = ->(f) { File.read(File.join(root, f)) }
 
   check "first run creates the migrations, model, controllers and views",
-        first.count { |l| l.start_with?("create") } == 11
+        first.count { |l| l.start_with?("create") } == 12
   check "second run changes nothing", second.none? { |l| l.start_with?("create", "update") }
   check "migrations sort users before the Kaisatsu tables",
         Dir.glob(File.join(root, "db/migrate/*")).sort.map { |f| File.basename(f).sub(/\A\d+_/, "") } ==
@@ -57,6 +57,41 @@ Dir.mktmpdir do |root|
     system(RbConfig.ruby, "-c", f, out: File::NULL, err: File::NULL)
   end
 
+  check "without --postal the mail setup prints to the log",
+        read.("app/models/mail_setup.rb").include?("ConsoleNotifier.new") && !read.("spin.toml").include?("cybertrain-postal")
+end
+
+# With --postal
+Dir.mktmpdir do |root|
+  FileUtils.mkdir_p(File.join(root, "app/controllers"))
+  FileUtils.mkdir_p(File.join(root, "config"))
+  File.write(File.join(root, "spin.toml"), %([package]\nname = "demo"\n\n[dependencies]\ncybertrain = { path = "/x" }\n))
+  File.write(File.join(root, "config/app.rb"), "Cybertrain.configure do |c|\nend\n")
+  File.write(File.join(root, "config/routes.rb"), %(Cybertrain::Routes.draw do\nend\n))
+  File.write(File.join(root, "app/controllers/application_controller.rb"), "class ApplicationController < Cybertrain::Controller\nend\n")
+  dep = Cybertrain::Kaisatsu::CLI::Installer.dependency_for(nil, nil, nil)
+  postal = Cybertrain::Kaisatsu::CLI::Installer.postal_dependency_for(nil, nil)
+  Cybertrain::Kaisatsu::CLI::Installer.new(root, dep, postal).run
+  Cybertrain::Kaisatsu::CLI::Installer.new(root, dep, postal).run
+  toml = File.read(File.join(root, "spin.toml"))
+  app = File.read(File.join(root, "config/app.rb"))
+  setup = File.read(File.join(root, "app/models/mail_setup.rb"))
+  check "--postal adds the postal dependency once, from git",
+        toml.scan(/^cybertrain-postal =/).size == 1 && toml.include?("Yucky39/cybertrain-postal")
+  check "--postal requires postal once, after kaisatsu",
+        app.scan(%(require "cybertrain/postal")).size == 1 && app.index("kaisatsu") < app.index("postal")
+  check "--postal writes the mail worker, which is the only file that links OpenSSL",
+        File.read(File.join(root, "bin/mail_worker.rb")).include?("cybertrain/postal/smtp_factory") &&
+        !setup.include?("smtp_factory") && !app.include?("smtp_factory") && !setup.include?("openssl")
+  check "--postal writes the postal mail setup",
+        setup.include?("class PostalNotifier")
+  check "the postal setup parses", system(RbConfig.ruby, "-c", File.join(root, "app/models/mail_setup.rb"), out: File::NULL, err: File::NULL)
+  check "the mail setup never writes the link or the address to the log",
+        setup.scan(/puts "[^"]*"/).none? { |l| l.include?("link") || l.include?("email") || l.include?("to}") }
+end
+
+Dir.mktmpdir do |root|
+  dep = Cybertrain::Kaisatsu::CLI::Installer.dependency_for(nil, nil, nil)
   missing = Dir.mktmpdir do |empty|
     begin
       Cybertrain::Kaisatsu::CLI::Installer.new(empty, dep).run

@@ -36,3 +36,7 @@
 1. 生成コマンド(`cybertrain generate kaisatsu`): users テーブル、`UserDirectory` の実装、ログイン/ログアウトのコントローラとビュー。
 2. パスワード再設定の流れ(`TokenStore` + ポスタルの通知差し込み口 `Notifier`)。
 3. CyberTrain のブログ例への組み込み。
+
+## `require "openssl"` を入れたバイナリでは Web サーバーが動かない
+
+`config/app.rb` に `require "openssl"` を足すだけで、アプリのすべてのリクエストが `NoMethodError: undefined method 'getbyte' for an instance of String` で 500 になる(`require "socket"` だけなら 200)。CyberTrain 本体が `openssl` パッケージを避けているのは、このためと思われる。SMTP の TLS には OpenSSL が必要なので、ポスタルのメール送信は、Web とは別のバイナリ(`bin/mail_worker.rb`)に分けた。Web 側は `cybertrain/postal`(OpenSSL を読まない中核部分)のスプールに書くだけ。詳細は Issue #2。

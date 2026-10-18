@@ -62,7 +62,7 @@ end
 - メールの送信は別スレッド(`BackgroundNotifier`)で行う。遅いメールサーバーがデータベース接続を占有せず、応答時間でアカウントの有無が分からない。
 - リンクの URL は `KAISATSU_BASE_URL`(本番で必ず設定。末尾のスラッシュなし)から作る。リクエストの `Host` ヘッダーは使わない(クライアントが変えられるため)。
 
-メールの送り先は `app/models/accounts.rb` の `Accounts.notifier` で決める。生成直後は `ConsoleNotifier` で、リンクをログに印字するだけ(開発専用。**リンクは秘密なので、本番ではログに出さない**)。本番では `Cybertrain::Kaisatsu::Notifier` を継承した送信クラス(例: cybertrain-postal 経由)に替える。
+メールの送り先は `app/models/mail_setup.rb` の `MailSetup.notifier` で決める。何も指定せずに入れると `ConsoleNotifier` で、リンクをログに印字するだけ(開発専用。**リンクは秘密なので、本番ではログに出さない**)。実際にメールを送るには、`--postal` を付けて入れる(次の節)。自前の送信クラスを使うなら、`Cybertrain::Kaisatsu::Notifier` を継承して `MailSetup.notifier` から返す。
 
 ```ruby
 class MailNotifier < Cybertrain::Kaisatsu::Notifier
@@ -79,3 +79,39 @@ end
 ```
 
 注意: メールアドレスの確認(`email_verified`)はまだない。未確認のアドレスにも再設定のリンクを送る。
+
+## メールを送る(`--postal`)
+
+```sh
+kaisatsu install --postal            # cybertrain-postal を Git から取る
+kaisatsu install --postal-path DIR   # ローカルのチェックアウトを使う
+```
+
+Web 側は、メールをスプール(`storage/mail_spool/`、1 通 1 ファイル)に書くだけで、SMTP には接続しない。送るのは別プログラム `bin/mail_worker.rb`(`cybertrain spin run mail_worker`)で、失敗した分は間隔を空けて再試行し、恒久的な失敗は `failed/` に移す。
+
+**分けている理由**: SMTP の TLS には OpenSSL が必要だが、OpenSSL をリンクしたバイナリでは、CyberTrain の Web サーバーがすべてのリクエストで `undefined method 'getbyte' for an instance of String` になる(Spinel 2026.09.12 で確認。`config/app.rb` に `require "openssl"` を足すだけで再現する。Issue #2)。ワーカーは Web とは別のバイナリなので影響を受けない。
+
+Web 側の設定:
+
+| 環境変数 | 内容 |
+| --- | --- |
+| `KAISATSU_MAIL_FROM` | 送信元アドレス。空ならメールは送らず、ログに印字する(開発) |
+| `KAISATSU_MAIL_FROM_NAME` | 表示名(任意) |
+| `KAISATSU_MAIL_SPOOL` | スプールのディレクトリ(既定 `storage/mail_spool`。ワーカーにも同じ値を渡す) |
+| `KAISATSU_BASE_URL` | リンクの土台(`https://example.com`、末尾のスラッシュなし) |
+
+ワーカー側の設定(`bin/mail_worker.rb` の冒頭にも書いてある):
+
+| 環境変数 | 内容 |
+| --- | --- |
+| `KAISATSU_SMTP_HOST` / `KAISATSU_SMTP_PORT` | SMTP サーバー(ポートの既定は 587) |
+| `KAISATSU_SMTP_TLS` | 未設定: STARTTLS を必須にし、失敗しても平文には落とさない / `implicit`: 最初から TLS(465) / `optional`: STARTTLS があれば使い、なければ平文(同じマシン上の中継・開発用) |
+| `KAISATSU_SMTP_USER` / `KAISATSU_SMTP_PASSWORD` | 認証。パスワードは TLS か、ループバック宛にしか送らない |
+| `KAISATSU_HELO` | EHLO で名乗る名前 |
+
+macOS の Homebrew では、ワーカーのビルドに `export LIBRARY_PATH=$(brew --prefix openssl@3)/lib CPATH=$(brew --prefix openssl@3)/include` が要る。
+
+注意:
+
+- `cybertrain-postal` のリポジトリが非公開だと、Git からの取得(`--postal`)は認証なしでは失敗する。公開するか、`--postal-path` を使う。
+- メールの宛先・本文・リンクはログに出さない。ただし、CyberTrain のリクエストログには、リンクを開いたときの URL(`/password/reset/<トークン>`)が残る。トークンは 1 回限りで 1 時間で切れ、DB にはダイジェストしか保存しないので、使用後や期限後のログは無害だが、ログの取り扱いには注意する。
