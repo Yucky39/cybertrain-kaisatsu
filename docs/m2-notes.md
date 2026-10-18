@@ -12,7 +12,7 @@
 
 ## 依存関係
 
-- `spin.toml` は `cybertrain = { path = "../CyberTrain" }`(ローカルのクローン)に依存している。公開前に Git タグ参照へ変える。
+- `spin.toml` は `cybertrain = { git = "https://github.com/saeki-mototsune/cybertrain", ref = "v0.2.1" }`(Git のタグ参照)に依存している。`spin test` は、このタグで 7/7 通る。開発中は `path = "../CyberTrain"` に替えて本体の最新を試してもよい。
 - `cybertrain/kaisatsu.rb` は純粋な部分だけ(フレームワーク不要)。DB・ミドルウェアを含む全体は `cybertrain/kaisatsu/full` を読む。
 
 ## テスト
