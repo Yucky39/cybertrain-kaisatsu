@@ -1,0 +1,7 @@
+#!/bin/sh
+# usage: script/try-variant FILE  -> builds test/zz_v.rb from FILE and prints the summary line
+cp "$1" test/zz_v.rb
+rm -f build/test/zz_v
+spin test test/zz_v.rb >/dev/null 2>&1
+if [ -x build/test/zz_v ]; then ./build/test/zz_v 2>&1 | grep -E "tests,"; else echo "build failed"; fi
+rm -f test/zz_v.rb build/test/zz_v*
