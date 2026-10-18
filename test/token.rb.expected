@@ -1,0 +1,6 @@
+ok   a token is 64 hex characters and its digest is not the token
+ok   the presented token matches its stored digest only
+ok   two tokens differ
+ok   expiry is inclusive of the deadline
+ok   secure equality is exact and length-aware
+5 tests, 16 assertions, 0 failures
