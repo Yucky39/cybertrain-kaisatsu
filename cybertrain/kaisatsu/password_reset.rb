@@ -66,6 +66,9 @@ module Cybertrain
 
         creds = @directory.credentials_for(name)
         return nil unless creds.found
+        # A reset link goes only to an address that was confirmed: otherwise anyone
+        # could register somebody else's address and have secrets mailed to it.
+        return nil unless @directory.email_verified?(creds.user_id)
         raw = TokenStore.save_token(conn, creds.user_id, TokenStore::PURPOSE_RESET, now, TTL)
         @notifier.send_password_reset(name, link_for(raw))
         nil

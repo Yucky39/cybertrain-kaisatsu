@@ -56,6 +56,16 @@ module Cybertrain
             EOS_KAISATSU
           ],
           [
+            "db/migrate/%{ts}02_add_email_verified_at_to_users.rb",
+            <<~'EOS_KAISATSU'
+              class AddEmailVerifiedAtToUsers < Cybertrain::Migration::Base
+                def change
+                  add_column "users", "email_verified_at", :integer
+                end
+              end
+            EOS_KAISATSU
+          ],
+          [
             "app/models/user.rb",
             <<~'EOS_KAISATSU'
               # Columns come from gen/models/user.rb (generated from db/schema.rb).
@@ -81,6 +91,19 @@ module Cybertrain
                   user.nil? ? "" : user.email
                 end
 
+                def email_verified?(user_id)
+                  user = User.find_by(id: user_id.to_i)
+                  !user.nil? && !user.email_verified_at.nil?
+                end
+
+                def mark_email_verified(user_id)
+                  user = User.find_by(id: user_id.to_i)
+                  return nil if user.nil?
+                  user.email_verified_at = Time.now.to_i
+                  user.save
+                  nil
+                end
+
                 def store_password_hash(user_id, password_hash)
                   user = User.find_by(id: user_id.to_i)
                   return nil if user.nil?
@@ -102,11 +125,20 @@ module Cybertrain
                   spawn_reset(@inner, email, link)
                 end
 
+                def send_email_verification(email, link)
+                  spawn_verification(@inner, email, link)
+                end
+
                 def send_password_changed(email)
                   spawn_changed(@inner, email)
                 end
 
                 private
+
+                def spawn_verification(inner, email, link)
+                  Thread.new { inner.send_email_verification(email, link) }
+                  nil
+                end
 
                 def spawn_reset(inner, email, link)
                   Thread.new { inner.send_password_reset(email, link) }
@@ -124,6 +156,7 @@ module Cybertrain
               module Accounts
                 @authenticator = nil
                 @password_reset = nil
+                @email_verification = nil
 
                 def self.authenticator
                   built = @authenticator
@@ -146,6 +179,24 @@ module Cybertrain
                 def self.base_url
                   configured = ENV["KAISATSU_BASE_URL"]
                   configured.nil? || configured.empty? ? "http://127.0.0.1:3000" : configured
+                end
+
+                # Whether the account's address was confirmed (for a banner, or to
+                # hold back a feature until it is).
+                def self.email_verified?(user_id)
+                  AccountDirectory.new.email_verified?(user_id)
+                end
+
+                def self.email_verification
+                  built = @email_verification
+                  if built.nil?
+                    directory = AccountDirectory.new
+                    inner = notifier
+                    mailer = BackgroundNotifier.new(inner)
+                    built = Cybertrain::Kaisatsu::EmailVerification.new(directory, mailer, base_url)
+                    @email_verification = built
+                  end
+                  built
                 end
 
                 def self.password_reset
@@ -235,11 +286,22 @@ module Cybertrain
                   end
                   user = User.new(email: email, password_hash: Cybertrain::Kaisatsu::PasswordHash.create(password))
                   user.save
-                  flash[:notice] = "Account created. Please sign in."
+                  send_confirmation(email)
+                  flash[:notice] = "Account created. We sent a link to confirm your email address. Please sign in."
                   redirect_to "/login", status: :see_other
                 end
 
                 private
+
+                # A DB.with block cannot see the controller's request: bind first.
+                def send_confirmation(email)
+                  ip = request.remote_addr
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_verification.request_verification(conn, email, ip, now)
+                  end
+                  nil
+                end
 
                 def signup_problem(email, password)
                   return "Email can't be blank" if email.empty?
@@ -269,7 +331,7 @@ module Cybertrain
                   <%= f.submit "Sign in" %>
                 </div>
               <% end %>
-              <p><a href="/signup">Create an account</a> · <a href="/password/forgot">Forgot your password?</a></p>
+              <p><a href="/signup">Create an account</a> · <a href="/password/forgot">Forgot your password?</a> · <a href="/email/resend">Confirm your email</a></p>
             EOS_KAISATSU
           ],
           [
@@ -397,6 +459,104 @@ module Cybertrain
                 </div>
               <% end %>
             EOS_KAISATSU
+          ],
+          [
+            "app/controllers/email_verifications_controller.rb",
+            <<~'EOS_KAISATSU'
+              class EmailVerificationsController < ApplicationController
+                # GET /email/resend
+                def new_action
+                end
+
+                # POST /email/resend
+                # The answer is the same whether or not the address has an account, or is confirmed.
+                def create
+                  send_link(params[:email].to_s)
+                  flash[:notice] = "If that address needs confirming, we sent a link."
+                  redirect_to "/login", status: :see_other
+                end
+
+                # GET /email/verify/:token
+                # Opening the link only shows a button: mail scanners and link previews fetch
+                # links, and must not confirm an address by doing so.
+                def edit
+                  @token = params[:token].to_s
+                  unless token_still_valid?(@token)
+                    flash[:alert] = "That link is invalid or has expired."
+                    return redirect_to("/email/resend", status: :see_other)
+                  end
+                  response.set_header("Referrer-Policy", "no-referrer")
+                end
+
+                # POST /email/verify
+                def update
+                  if confirm(params[:token].to_s).done?
+                    flash[:notice] = "Your email address is confirmed."
+                    redirect_to "/login", status: :see_other
+                  else
+                    flash[:alert] = "That link is invalid or has expired."
+                    redirect_to "/email/resend", status: :see_other
+                  end
+                end
+
+                private
+
+                # Everything a DB.with block needs is a local first: inside the block `self`
+                # is not the controller under Spinel.
+                def send_link(email)
+                  ip = request.remote_addr
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_verification.request_verification(conn, email, ip, now)
+                  end
+                  nil
+                end
+
+                def token_still_valid?(token)
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_verification.token_valid?(conn, token, now)
+                  end
+                end
+
+                def confirm(token)
+                  now = Time.now.to_i
+                  DB.with do |conn|
+                    Accounts.email_verification.complete_verification(conn, token, now)
+                  end
+                end
+              end
+            EOS_KAISATSU
+          ],
+          [
+            "app/views/email_verifications/new_action.html.erb",
+            <<~'EOS_KAISATSU'
+              <h1>Confirm your email address</h1>
+              <p>Enter your email address and we will send a new link, if it needs confirming.</p>
+              <%= form_with(url: "/email/resend") do |f| %>
+                <div class="field">
+                  <%= f.label :email %>
+                  <%= f.email_field :email, autocomplete: "username" %>
+                </div>
+                <div class="actions">
+                  <%= f.submit "Send the link" %>
+                </div>
+              <% end %>
+              <p><a href="/login">Back to sign in</a></p>
+            EOS_KAISATSU
+          ],
+          [
+            "app/views/email_verifications/edit.html.erb",
+            <<~'EOS_KAISATSU'
+              <h1>Confirm your email address</h1>
+              <p>Press the button to confirm that this is your email address.</p>
+              <%= form_with(url: "/email/verify") do |f| %>
+                <%= f.hidden_field :token, value: @token %>
+                <div class="actions">
+                  <%= f.submit "Confirm" %>
+                </div>
+              <% end %>
+            EOS_KAISATSU
           ]
         ].freeze
 
@@ -442,6 +602,14 @@ module Cybertrain
                            "Open this link within one hour to choose a new password:\n\n" +
                            link + "\n\n" \
                            "If it was not you, ignore this mail: your password stays the same.\n")
+            end
+
+            def send_email_verification(email, link)
+              enqueue_text(email, "Confirm your email address",
+                           "Please confirm that this is your email address.\n\n" \
+                           "Open this link and press the button within three days:\n\n" +
+                           link + "\n\n" \
+                           "If you did not create an account, ignore this mail.\n")
             end
 
             def send_password_changed(email)
@@ -591,6 +759,10 @@ module Cybertrain
           post "/password/forgot", to: "password_resets#create", as: "create_forgot_password"
           get "/password/reset/:token", to: "password_resets#edit", as: "reset_password"
           post "/password/reset", to: "password_resets#update", as: "update_password"
+          get "/email/resend", to: "email_verifications#new_action", as: "resend_verification"
+          post "/email/resend", to: "email_verifications#create", as: "create_resend_verification"
+          get "/email/verify/:token", to: "email_verifications#edit", as: "verify_email"
+          post "/email/verify", to: "email_verifications#update", as: "update_verify_email"
         EOS_KAISATSU
 
         REQUIRE_LINE = %(require "cybertrain/kaisatsu/full"\n).freeze

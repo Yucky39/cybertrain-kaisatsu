@@ -16,19 +16,21 @@ cybertrain server
 | --- | --- |
 | `db/migrate/…_create_users.rb` | `users`(`email` は一意、`password_hash`) |
 | `db/migrate/…_create_kaisatsu_tables.rb` | `kaisatsu_sessions` / `kaisatsu_tokens` / `kaisatsu_attempts` |
+| `db/migrate/…_add_email_verified_at_to_users.rb` | `users.email_verified_at`(確認した時刻。NULL は未確認) |
 | `app/models/user.rb` | `User`(列は `db/schema.rb` から生成される) |
 | `app/models/accounts.rb` | `AccountDirectory`(`users` 表を改札に結ぶ)と `Accounts.authenticator` |
 | `app/controllers/sessions_controller.rb` | ログイン(`/login`)とログアウト(`DELETE /logout`) |
 | `app/controllers/registrations_controller.rb` | 新規登録(`/signup`) |
 | `app/controllers/password_resets_controller.rb` | パスワード再設定(`/password/forgot`、`/password/reset/:token`) |
-| `app/views/sessions/`、`app/views/registrations/`、`app/views/password_resets/` | フォーム |
+| `app/controllers/email_verifications_controller.rb` | メールアドレスの確認(`/email/resend`、`/email/verify/:token`) |
+| `app/views/sessions/`、`app/views/registrations/`、`app/views/password_resets/`、`app/views/email_verifications/` | フォーム |
 
 既存のファイルへは、次の小さな追記だけを行う(2 回目以降は何もしない)。
 
 - `spin.toml`: `cybertrain-kaisatsu` の依存を追加。
 - `config/app.rb`: 先頭に `require "cybertrain/kaisatsu/full"`。
 - `app/controllers/application_controller.rb`: `before_action { |c| Cybertrain::Kaisatsu::Gate.resolve(c.ctx) }`(毎リクエスト、セッション ID を DB で確認する)と、`signed_in?` / `current_user_id` / `require_login`。
-- `config/routes.rb`: 9 本のルート(足りない分だけを足す)。
+- `config/routes.rb`: 13 本のルート(足りない分だけを足す)。
 
 既存のファイルが想定の形でないときは、`MANUAL` と表示される。上の内容を手で足す。
 
@@ -78,7 +80,23 @@ class MailNotifier < Cybertrain::Kaisatsu::Notifier
 end
 ```
 
-注意: メールアドレスの確認(`email_verified`)はまだない。未確認のアドレスにも再設定のリンクを送る。
+
+
+## メールアドレスの確認
+
+1. 新規登録の直後に、確認のリンク(`/email/verify/<64 文字>`、3 日間有効、1 回限り)を送る。登録そのものは、確認を待たずに完了する。
+2. リンクを開くと「Confirm」ボタンだけが出る。**開いただけでは確認されない**(メールのスキャナやリンクのプレビューがリンクを取得するため)。ボタンを押すと(POST)、`users.email_verified_at` に時刻が入る。
+3. 届かなかったときは、`/email/resend` からメールアドレスを入れて再送する。アカウントの有無や確認済みかどうかにかかわらず、同じ応答になる。要求は、アカウント単位 3 回/時間、IP 単位 10 回/時間まで。
+
+**確認済みのアドレスにしか、パスワード再設定のリンクを送らない。** 他人のアドレスで登録した人に、そのアドレス宛の秘密のリンクを出させないため。未確認のままだと、パスワードを忘れても再設定できない(ログイン自体は、確認前でもできる)。
+
+アプリ側の使い方:
+
+```ruby
+Accounts.email_verified?(current_user_id.to_i)   # 画面の案内や、機能の出し分けに
+```
+
+**すでに入れてあるアプリへの追加**: ファイルは上書きしない(`skip`)ので、新しい分だけが足される(移行、確認用のコントローラとビュー、ルート)。ただし、既存の `accounts.rb`(`email_verified?` / `mark_email_verified` / `Accounts.email_verification`)と `registrations_controller.rb`(登録直後の送信)は、`kaisatsu install` では更新されない。ファイルを一度退避して入れ直すか、`cybertrain/kaisatsu/cli/templates.rb` の内容を手で足す。**既存のユーザーは全員「未確認」になる**ので、再設定を使う前に、確認のリンクを要求してもらう必要がある。
 
 ## メールを送る(`--postal`)
 

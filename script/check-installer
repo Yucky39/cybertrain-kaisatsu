@@ -37,11 +37,11 @@ Dir.mktmpdir do |root|
   read = ->(f) { File.read(File.join(root, f)) }
 
   check "first run creates the migrations, model, controllers and views",
-        first.count { |l| l.start_with?("create") } == 12
+        first.count { |l| l.start_with?("create") } == 16
   check "second run changes nothing", second.none? { |l| l.start_with?("create", "update") }
-  check "migrations sort users before the Kaisatsu tables",
+  check "migrations sort users, then the Kaisatsu tables, then the verified column",
         Dir.glob(File.join(root, "db/migrate/*")).sort.map { |f| File.basename(f).sub(/\A\d+_/, "") } ==
-        %w[create_users.rb create_kaisatsu_tables.rb]
+        %w[create_users.rb create_kaisatsu_tables.rb add_email_verified_at_to_users.rb]
   check "spin.toml gets the dependency once", read.("spin.toml").scan("cybertrain-kaisatsu").size == 1 &&
         read.("spin.toml").include?(%(path = "/src/kaisatsu"))
   check "config/app.rb requires kaisatsu first", read.("config/app.rb").start_with?(%(require "cybertrain/kaisatsu/full"))
@@ -51,8 +51,8 @@ Dir.mktmpdir do |root|
         controller.include?("def record_not_found") && controller.include?("def require_login") &&
         controller.scan(/^  private$/).size == 1
   routes = read.("config/routes.rb")
-  check "routes keep the root and gain nine named routes",
-        routes.include?(%(root "home#index")) && routes.scan(/as: "/).size == 9 && routes.rstrip.end_with?("end")
+  check "routes keep the root and gain thirteen named routes",
+        routes.include?(%(root "home#index")) && routes.scan(/as: "/).size == 13 && routes.rstrip.end_with?("end")
   check "generated Ruby parses", Dir.glob(File.join(root, "{app,db,config}/**/*.rb")).all? do |f|
     system(RbConfig.ruby, "-c", f, out: File::NULL, err: File::NULL)
   end

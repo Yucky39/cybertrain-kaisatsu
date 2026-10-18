@@ -10,6 +10,7 @@ K::PasswordHash.iterations = 1000
 class ResetDirectory < K::UserDirectory
   def initialize
     @hash = ""
+    @verified = true
   end
 
   def set_hash(value)
@@ -29,6 +30,14 @@ class ResetDirectory < K::UserDirectory
 
   def email_for(user_id)
     user_id == "1" ? "taro@example.com" : ""
+  end
+
+  def email_verified?(user_id)
+    @verified
+  end
+
+  def verified=(value)
+    @verified = value
   end
 end
 
@@ -101,6 +110,17 @@ test "a reset request for a known account sends one link to that address" do
   assert_equal "taro@example.com", w.notifier.last_email
   assert w.notifier.last_link.start_with?(PREFIX)
   assert_equal 64, w.notifier.last_token.bytesize
+  w.conn.close
+end
+
+test "an address that was never confirmed gets no reset link" do
+  w = World.new
+  w.directory.verified = false
+  w.reset.request_reset(w.conn, "taro@example.com", "", 1000)
+  assert_equal 0, w.notifier.resets
+  w.directory.verified = true
+  w.reset.request_reset(w.conn, "taro@example.com", "", 1001)
+  assert_equal 1, w.notifier.resets
   w.conn.close
 end
 
