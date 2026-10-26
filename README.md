@@ -57,7 +57,7 @@ Without options, mail is printed to the log, which is for development only (a li
 ruby /path/to/cybertrain-kaisatsu/exe/kaisatsu install --postal
 ```
 
-The web application only writes each message to a spool directory; a separate program, `bin/mail_worker.rb`, sends it over SMTP (STARTTLS required by default), retrying with backoff. They are separate on purpose: at this Spinel release a binary that links OpenSSL cannot run the CyberTrain web server (every request fails), and SMTP over TLS needs OpenSSL. The settings, and how to run the worker, are in [docs/install.md](docs/install.md).
+The web application only writes each message to a spool directory; a separate program, `bin/mail_worker.rb`, sends it over SMTP (STARTTLS required by default), retrying with backoff. They are separate on purpose: with CyberTrain v0.2.1 a binary that links OpenSSL cannot run the web server (every request fails), and SMTP over TLS needs OpenSSL. CyberTrain `main` fixed that ([CyberTrain#27](https://github.com/saeki-mototsune/CyberTrain/issues/27)); sending from the web binary then works too (put `require "openssl"` first in `config/app.rb`, see [docs/m2-notes.md](docs/m2-notes.md)), but the separate worker remains the default. The settings, and how to run the worker, are in [docs/install.md](docs/install.md).
 
 ## What is checked
 
@@ -70,7 +70,7 @@ The web application only writes each message to a spool directory; a separate pr
 - CyberTrain has no hook for adding middleware, so the session check runs from a `before_action` in `ApplicationController` (`Gate.resolve`).
 - No two-factor authentication, passkeys, OAuth or roles yet.
 - Unicode normalisation of passwords is not applied; the bytes are used as given.
-- Two Spinel / CyberTrain problems found while building this are written up and reported upstream: class-variable arrays sharing storage after a GC in the test harness ([#1](https://github.com/Yucky39/cybertrain-kaisatsu/issues/1), [CyberTrain#26](https://github.com/saeki-mototsune/CyberTrain/issues/26)), and `require "openssl"` breaking the web server ([#2](https://github.com/Yucky39/cybertrain-kaisatsu/issues/2), [CyberTrain#27](https://github.com/saeki-mototsune/CyberTrain/issues/27)).
+- Two Spinel / CyberTrain problems found while building this were reported upstream and are fixed in CyberTrain `main` (not yet in a tagged release): class-variable arrays sharing storage after a GC in the test harness ([#1](https://github.com/Yucky39/cybertrain-kaisatsu/issues/1), [CyberTrain#26](https://github.com/saeki-mototsune/CyberTrain/issues/26)), and `require "openssl"` breaking the web server ([#2](https://github.com/Yucky39/cybertrain-kaisatsu/issues/2), [CyberTrain#27](https://github.com/saeki-mototsune/CyberTrain/issues/27)).
 - The request log of CyberTrain contains the path of a mailed link (`/password/reset/<token>`). Tokens are single-use and expire, but treat the log as sensitive.
 
 ## Documentation

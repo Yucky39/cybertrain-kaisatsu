@@ -43,3 +43,13 @@
 `config/app.rb` に `require "openssl"` を足すだけで、アプリのすべてのリクエストが `NoMethodError: undefined method 'getbyte' for an instance of String` で 500 になる(`require "socket"` だけなら 200)。CyberTrain 本体が `openssl` パッケージを避けているのは、このためと思われる。SMTP の TLS には OpenSSL が必要なので、ポスタルのメール送信は、Web とは別のバイナリ(`bin/mail_worker.rb`)に分けた。Web 側は `cybertrain/postal`(OpenSSL を読まない中核部分)のスプールに書くだけ。詳細は Issue #2。
 
 **原因**(本体の Issue #27 のコメントに、CyberTrain を使わない最小の再現つきで書いた): `openssl` に限らず、Spinel 2026.09.12 では、**どれかのクラスが `getbyte` という名前のメソッドを定義すると、多相の(型が一つに決まらない)受け手への `x.getbyte(i)` が、受け手が `String` のときに `NoMethodError` になる**。組み込みの `String#getbyte` が、ユーザー定義の `getbyte` だけの表に置き換わるように見える。`openssl` パッケージは `OpenSSL::Buffering#getbyte` を定義しているので、読み込むだけで起きる。自前のクラスに `def getbyte` を書いただけ(`openssl` なし、一度もインスタンス化しなくても)でも同じ。受け手が `String` と確定している呼び出しは問題ない。CyberTrain 本体には `getbyte` の呼び出しが 9 ファイル 24 か所ある。他の組み込みメソッド名(`size`、`bytesize` など)で同じことが起きるかは、試していない。本体への報告: https://github.com/saeki-mototsune/CyberTrain/issues/27
+
+### 上流で直った後の確認(CyberTrain main `cb83688`、Spinel 2026.09.12)
+
+#26 と #27 は CyberTrain 本体の main で修正された(512d667、d459d6e。v0.2.1 の後のタグはまだない)。main に対して次を確かめた。
+
+- `spin test`: 9/9 が通る(`spin.toml` の `cybertrain` を `ref = "main"` にして実行)。
+- `config/app.rb` に `require "openssl"` を足した新規アプリは、開発サーバーでも本番ビルド(`cybertrain build`)でも、日本語のクエリ・ヘッダー付きの要求が 200 で通り、`ab` 2,000 件で失敗は 0 だった。
+- 改札とポスタルを入れたカンバンアプリ(Yucky39/kanban)で、Web バイナリに `cybertrain/postal/smtp_factory`(OpenSSL)をリンクし、確認メールをスレッド上で Mailpit に直接送る実験をした。`script/verify` は開発サーバー・本番ビルドとも 42/42 で、確認メールは 2 通届いた。`ab` で `GET /login` を 20 並列・3,000 件、失敗 0、毎秒約 20,000 件、メモリ約 14 MB。
+- **`require "openssl"` は `config/app.rb` の先頭に置く。** `cybertrain/kaisatsu/full` や `cybertrain/postal/smtp_factory` の後に `openssl` が読まれる並びだと、ビルドが `openssl/digest.rb:40: unsupported call ... sha256_bin` で止まった(`openssl` を先頭にすると通る)。原因の切り分けは途中で、Spinel 側の定数の解決順に関わると思われる。
+- したがって、ワーカーを分ける理由は「動かない」から「分けたいなら分ける」に変わる。分離の既定は変えていない(メールの再試行と配達の記録が Web の再起動と無関係になる利点は残る)。Web バイナリから直接送る構成は、タグが切られてから既定にするか決める。
