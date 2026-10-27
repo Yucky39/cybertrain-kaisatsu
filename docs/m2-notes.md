@@ -54,3 +54,14 @@
 - **`require "openssl"` は `config/app.rb` の先頭に置く。** `cybertrain/kaisatsu/full` や `cybertrain/postal/smtp_factory` の後に `openssl` が読まれる並びだと、ビルドが `openssl/digest.rb:40: unsupported call ... sha256_bin` で止まった(`openssl` を先頭にすると通る)。原因の切り分けは途中で、Spinel 側の定数の解決順に関わると思われる。
 - したがって、ワーカーを分ける理由は「動かない」から「分けたいなら分ける」に変わる。分離の既定は変えていない(メールの再試行と配達の記録が Web の再起動と無関係になる利点は残る)。Web バイナリから直接送る構成は、タグが切られてから既定にするか決める。
 - Spinel 本体: ユーザー定義の `getbyte` などが組み込みメソッドを隠す問題は、matz/spinel#4816 として報告済みで、master で修正されている(2026-09-22)。Spinel 2026.10.25 をビルドして、再現コード(`Reader#getbyte` を定義し、`["abc", 42]` の要素に `getbyte(0)` を呼ぶ)が 2026.09.12 の `NoMethodError` から `97` になることを確かめた(`bytesize` も同様)。新しく報告する必要はない。ただし CyberTrain main は Spinel 2026.10.25 ではまだ使えない: `spin test` は 87/98(2026.09.12 では 97/98。差の 10 件は CyberTrain の docs/spinel-feedback.md にある「Regressions in newer packages」と同じ)で、カンバンアプリは `migration.rb:173: a constant write given a Hash ...` でビルドが拒否される。当面は Spinel 2026.09.12 のままにする(CyberTrain#27 のコメントに詳細)。
+
+### CyberTrain v0.3.0 / Spinel 2026.10.26.7019 での確認(2026-10-27)
+
+CyberTrain 本体の #27 に先方(saeki-mototsune)から返信があり、v0.3.0 が固定する Spinel(フォーク版 2026.10.26.7019)で、前に挙げた退行は直っているとのことだったので、改札・ポスタル・カンバンで確かめた。
+
+- ポスタル: `spin test` 10/10、`integration/run-mailpit` の全項目が通る。
+- 改札: そのままだと `spin test` は 8/9 で、`gate_chain.rb` が 5 件 `undefined method 'ok?' for an instance of Cybertrain::Kaisatsu::LoginResult` で落ちた。生成コントローラのカンバンも `spin build` が 3 件拒否された(`unsupported condition (non-bool) ... token_still_valid?`)。どちらも、`Cybertrain::DB.with` ブロックの値を、そのままメソッド呼び出しや `if` に使っているのが原因。この Spinel では、その値の型が決まらず、メソッド呼び出しは実行時に `NoMethodError`、条件は拒否になる。2026.09.12 と、公式の 2026.10.25 では起きない。CyberTrain 本体の DB だけで再現する 30 行ほどのプログラムがある(`LoginResult` のようなクラスを返すブロックの値に `.ok?` を呼ぶ)。
+- **直し方**: ブロックの前に、型の決まった変数に仮の値を入れておき、ブロックの中で代入して、ブロックの外で使う(`outcome = LoginResult.new("none", "", ""); DB.with { |conn| outcome = auth.login(...) }; outcome`)。真偽値は `false` で用意する。生成コントローラのテンプレートと `test/gate_chain.rb` をこの形に直した。この形は 2026.09.12 でも通る。
+- **生成コントローラの `DB.with` は `Cybertrain::DB.with` と書く。** トップレベルのクラスから裸の `DB` は引けず、この Spinel では `NameError: uninitialized constant SessionsController::DB` で全リクエストが 500 になった(2026.09.12 では定数の解決が緩く、動いていた)。ライブラリ内の `DB` は `module Cybertrain` の中にあるので問題ない。
+- 直した後: 改札 `spin test` 9/9(2026.09.12 でも 9/9)、`script/check-installer` 通過、カンバンは本番ビルドで `script/verify` 42/42。Web バイナリに SMTP(OpenSSL)を入れる構成も 42/42 でメール 2 通着信。
+- 前に書いた「`require "openssl"` を先頭に置かないとビルドが止まる」は、この Spinel では起きなかった(`cybertrain/postal/smtp_factory` を `cybertrain/kaisatsu/full` の後に置いてビルドが通り、42/42、`GET /login` は約 16,000 件/秒、失敗 0)。

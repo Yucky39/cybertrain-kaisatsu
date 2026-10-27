@@ -50,10 +50,15 @@ def handle_login(ctx)
   nil
 end
 
+# The result is declared first and assigned in the block: the value of a
+# DB.with block is untyped, and a method call on it fails at run time on Spinel
+# 2026.10.26.7019.
 def login_result(ctx)
+  result = K::LoginResult.new("none", "", "")
   Cybertrain::DB.with do |conn|
-    AUTH.login(conn, ctx.params["email"].to_s, ctx.params["password"].to_s, "", Time.now.to_i)
+    result = AUTH.login(conn, ctx.params["email"].to_s, ctx.params["password"].to_s, "", Time.now.to_i)
   end
+  result
 end
 
 def handle_logout(ctx)

@@ -8,7 +8,7 @@ It adds sign-up, sign-in, sign-out, e-mail confirmation, password reset and addr
 
 ## Requirements
 
-- Spinel 2026.09.12 and CyberTrain v0.2.1 (the versions this was written against; `cybertrain setup` installs Spinel).
+- CyberTrain v0.3.0 with the Spinel it pins (2026.10.26.7019, installed by `cybertrain setup`). The library's tests also pass on Spinel 2026.09.12 with CyberTrain v0.2.1, which this was first written against.
 - Ruby 3.2 or later for the `kaisatsu` generator command (the application itself never runs on CRuby).
 - For sending mail: [cybertrain-postal](https://github.com/Yucky39/cybertrain-postal), and OpenSSL headers to build its worker (see "Sending mail").
 

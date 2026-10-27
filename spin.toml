@@ -3,5 +3,4 @@ name = "cybertrain-kaisatsu"
 version = "0.0.1"
 
 [dependencies]
-# main until a release after v0.2.1: it carries the fixes for CyberTrain#26 and #27.
-cybertrain = { git = "https://github.com/saeki-mototsune/cybertrain", ref = "main" }
+cybertrain = { git = "https://github.com/saeki-mototsune/cybertrain", ref = "v0.3.0" }
