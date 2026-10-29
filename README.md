@@ -72,6 +72,15 @@ The web application only writes each message to a spool directory; a separate pr
 - Unicode normalisation of passwords is not applied; the bytes are used as given.
 - Two Spinel / CyberTrain problems found while building this were reported upstream and are fixed in CyberTrain v0.3.1: class-variable arrays sharing storage after a GC in the test harness ([#1](https://github.com/Yucky39/cybertrain-kaisatsu/issues/1), [CyberTrain#26](https://github.com/saeki-mototsune/CyberTrain/issues/26)), and `require "openssl"` breaking the web server ([#2](https://github.com/Yucky39/cybertrain-kaisatsu/issues/2), [CyberTrain#27](https://github.com/saeki-mototsune/CyberTrain/issues/27)).
 - The request log of CyberTrain contains the path of a mailed link (`/password/reset/<token>`). Tokens are single-use and expire, but treat the log as sensitive.
+- Behind a reverse proxy on the same machine, set `CYBERTRAIN_TRUSTED_PROXY=1` (see [docs/install.md](docs/install.md)). Without it every visitor shares the proxy's address in the sign-in limits, and one person's failed attempts can lock everyone out.
+- Five failed sign-ins lock an account for 15 minutes, so anyone who knows an address can keep that person out for a while ([#6](https://github.com/Yucky39/cybertrain-kaisatsu/issues/6)).
+- Sign-up says when an address is already taken, so it can be used to find out who has an account, and it has no attempt limit ([#5](https://github.com/Yucky39/cybertrain-kaisatsu/issues/5)). Sign-in and password reset answer the same for any address.
+- Old sign-in attempt records and expired tokens are never deleted ([#3](https://github.com/Yucky39/cybertrain-kaisatsu/issues/3)).
+- With `--postal`, an unset `KAISATSU_MAIL_FROM` still falls back to printing mail to the log, links included. Set it in production ([#4](https://github.com/Yucky39/cybertrain-kaisatsu/issues/4)).
+- The signed-in user's id is also kept in the signed session cookie; a controller that does not run `Gate.resolve` can treat a revoked session as signed in ([#7](https://github.com/Yucky39/cybertrain-kaisatsu/issues/7)).
+- Sessions only end at 14 days; there is no idle timeout, and the old address gets a notice but no undo link after an email change ([#9](https://github.com/Yucky39/cybertrain-kaisatsu/issues/9)).
+- No `SECURITY.md` and no CI yet ([#8](https://github.com/Yucky39/cybertrain-kaisatsu/issues/8)). Until then, report a vulnerability by a private message to the maintainer rather than a public issue.
+- Mail has only been tried against Mailpit, not a real provider (see cybertrain-postal's Known limits).
 
 ## Documentation
 
@@ -84,7 +93,7 @@ Written in Japanese:
 ## Development
 
 ```sh
-export PATH=$HOME/.cybertrain/spinel/2026.09.12/bin:$PATH   # after `cybertrain setup`
+export PATH=$HOME/.cybertrain/spinel/2026.10.27.7020/bin:$PATH   # after `cybertrain setup`
 spin test                       # the library's tests, under Spinel
 ruby script/check-installer     # the generator, under CRuby
 ```
