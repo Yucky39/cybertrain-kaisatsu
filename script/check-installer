@@ -78,6 +78,8 @@ Dir.mktmpdir do |root|
   setup = File.read(File.join(root, "app/models/mail_setup.rb"))
   check "--postal adds the postal dependency once, from git",
         toml.scan(/^cybertrain-postal =/).size == 1 && toml.include?("Yucky39/cybertrain-postal")
+  check "both git dependencies are pinned to the v0.0.1 tag, not a branch",
+        toml.scan(/ref = "v0\.0\.1"/).size == 2 && !toml.include?(%(ref = "main"))
   check "--postal requires postal once, after kaisatsu",
         app.scan(%(require "cybertrain/postal")).size == 1 && app.index("kaisatsu") < app.index("postal")
   check "--postal writes the mail worker, which is the only file that links OpenSSL",

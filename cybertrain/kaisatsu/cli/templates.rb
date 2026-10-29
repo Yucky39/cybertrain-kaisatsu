@@ -333,7 +333,7 @@ module Cybertrain
                 def login_result
                   email = params[:email].to_s
                   password = params[:password].to_s
-                  ip = request.remote_addr
+                  ip = request.client_ip
                   now = Time.now.to_i
                   # Everything the block needs is a local first: inside a Cybertrain::DB.with block
                   # `self` is not the controller under Spinel, so request/ctx/params would not resolve.
@@ -378,7 +378,7 @@ module Cybertrain
 
                 # A Cybertrain::DB.with block cannot see the controller's request: bind first.
                 def send_confirmation(email)
-                  ip = request.remote_addr
+                  ip = request.client_ip
                   now = Time.now.to_i
                   Cybertrain::DB.with do |conn|
                     Accounts.email_verification.request_verification(conn, email, ip, now)
@@ -486,7 +486,7 @@ module Cybertrain
                 # Everything a Cybertrain::DB.with block needs is a local first: inside the block `self`
                 # is not the controller under Spinel.
                 def send_reset_link(email)
-                  ip = request.remote_addr
+                  ip = request.client_ip
                   now = Time.now.to_i
                   Cybertrain::DB.with do |conn|
                     Accounts.password_reset.request_reset(conn, email, ip, now)
@@ -587,7 +587,7 @@ module Cybertrain
                 # Everything a Cybertrain::DB.with block needs is a local first: inside the block `self`
                 # is not the controller under Spinel.
                 def send_link(email)
-                  ip = request.remote_addr
+                  ip = request.client_ip
                   now = Time.now.to_i
                   Cybertrain::DB.with do |conn|
                     Accounts.email_verification.request_verification(conn, email, ip, now)

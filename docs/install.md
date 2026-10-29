@@ -8,7 +8,11 @@ cybertrain db migrate
 cybertrain server
 ```
 
-`--path` を省略すると、`spin.toml` の依存は GitHub の `main` ブランチを指す(固定されないので、公開後はタグを `--ref` で指定する)。
+`--path` を省略すると、`spin.toml` の依存は GitHub のタグ `v0.0.1` を指す(`--ref` で別のタグやブランチも指定できる)。
+
+### リバースプロキシの後ろに置くとき
+
+ログインの試行回数の制限は、接続元の IP アドレスごとに数える。生成されるコントローラは `request.client_ip` を使うので、nginx や Caddy を同じマシンの前段に置くときは、サーバーに `CYBERTRAIN_TRUSTED_PROXY=1`(別マシンなら `CYBERTRAIN_TRUSTED_PROXIES`)を設定する。設定しないと全員がプロキシの IP として数えられ、誰かが失敗を重ねるだけで全員がサインインできなくなる。
 
 ## 作られるもの
 
