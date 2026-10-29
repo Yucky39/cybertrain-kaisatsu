@@ -79,7 +79,6 @@ The web application only writes each message to a spool directory; a separate pr
 - With `--postal`, an unset `KAISATSU_MAIL_FROM` still falls back to printing mail to the log, links included. Set it in production ([#4](https://github.com/Yucky39/cybertrain-kaisatsu/issues/4)).
 - The signed-in user's id is also kept in the signed session cookie; a controller that does not run `Gate.resolve` can treat a revoked session as signed in ([#7](https://github.com/Yucky39/cybertrain-kaisatsu/issues/7)).
 - Sessions only end at 14 days; there is no idle timeout, and the old address gets a notice but no undo link after an email change ([#9](https://github.com/Yucky39/cybertrain-kaisatsu/issues/9)).
-- No `SECURITY.md` and no CI yet ([#8](https://github.com/Yucky39/cybertrain-kaisatsu/issues/8)). Until then, report a vulnerability by a private message to the maintainer rather than a public issue.
 - Mail has only been tried against Mailpit, not a real provider (see cybertrain-postal's Known limits).
 
 ## Documentation
