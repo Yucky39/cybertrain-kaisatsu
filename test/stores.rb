@@ -25,10 +25,33 @@ test "a server session resolves to its user until it expires" do
   conn = fresh_conn
   sid = K::ServerSessions.open_session(conn, "42", 1000, 100)
   assert_equal 64, sid.bytesize
+  unused = K::ServerSessions.open_session(conn, "42", 1000, 100)
   assert_equal "42", K::ServerSessions.resolve_user(conn, sid, 1050)
-  assert_equal "", K::ServerSessions.resolve_user(conn, sid, 1100)
+  assert_equal "", K::ServerSessions.resolve_user(conn, unused, 1100)
   assert_equal "", K::ServerSessions.resolve_user(conn, "0" * 64, 1050)
   assert_equal "", K::ServerSessions.resolve_user(conn, "short", 1050)
+  conn.close
+end
+
+test "using a session moves its expiry forward, but never past the absolute limit" do
+  conn = fresh_conn
+  idle = K::ServerSessions::IDLE_TTL
+  limit = K::ServerSessions::ABSOLUTE_TTL
+  sid = K::ServerSessions.open_session(conn, "42", 1000, idle)
+  # Used again on day 5 of 7 idle days: alive on day 11, which it would not be unslid.
+  day5 = 1000 + 5 * 86_400
+  assert_equal "42", K::ServerSessions.resolve_user(conn, sid, day5)
+  assert_equal "42", K::ServerSessions.resolve_user(conn, sid, day5 + idle - 10)
+  # A session in use every few days still ends at the absolute limit.
+  t = day5
+  while t < 1000 + limit - 86_400
+    t += 3 * 86_400
+    K::ServerSessions.resolve_user(conn, sid, t)
+  end
+  assert_equal "", K::ServerSessions.resolve_user(conn, sid, 1000 + limit + 10)
+  # Not used for the whole idle period: gone.
+  quiet = K::ServerSessions.open_session(conn, "7", 1000, idle)
+  assert_equal "", K::ServerSessions.resolve_user(conn, quiet, 1000 + idle + 1)
   conn.close
 end
 
@@ -113,6 +136,26 @@ test "throttle keys are stored as digests" do
   K::Throttle.note_failure(conn, "account:a@example.com", 1000, 900)
   rows = conn.execute("SELECT bucket FROM kaisatsu_attempts")
   refute rows[0]["bucket"].include?("example")
+  conn.close
+end
+
+test "Throttle.hit lets the first attempts through and counts every one" do
+  conn = fresh_conn
+  3.times { assert K::Throttle.hit(conn, "signup:10.0.0.1", 1000, 3, 900) }
+  refute K::Throttle.hit(conn, "signup:10.0.0.1", 1001, 3, 900)
+  assert K::Throttle.hit(conn, "signup:10.0.0.2", 1001, 3, 900)
+  assert K::Throttle.hit(conn, "signup:10.0.0.1", 1900, 3, 900)
+  conn.close
+end
+
+test "Throttle.purge_expired drops the counters whose window is over, and only those" do
+  conn = fresh_conn
+  K::Throttle.note_failure(conn, "old", 1000, 900)
+  K::Throttle.note_failure(conn, "fresh", 1800, 900)
+  K::Throttle.purge_expired(conn, 1950, 900)
+  assert_equal 1, conn.execute("SELECT COUNT(*) AS n FROM kaisatsu_attempts")[0]["n"]
+  refute K::Throttle.blocked?(conn, "old", 1950, 1, 900)
+  assert K::Throttle.blocked?(conn, "fresh", 1950, 1, 900)
   conn.close
 end
 

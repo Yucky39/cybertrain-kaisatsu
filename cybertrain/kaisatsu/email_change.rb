@@ -94,11 +94,12 @@ module Cybertrain
         return ChangeRequestOutcome.new(INVALID_EMAIL) if target == old_email
 
         # The password is the proof that the person at the keyboard is the owner.
-        # A wrong one counts against the same limit as signing in, so this form
-        # cannot be used to guess it.
+        # A wrong one counts against the account's sign-in counter, and is
+        # refused at the limit one address gets there (Authenticator::PAIR_LIMIT),
+        # so this form cannot be used to guess it.
         sign_in_key = "account:" + old_email
         change_key = "change:" + user_id
-        if Throttle.blocked?(conn, sign_in_key, now, Authenticator::ACCOUNT_LIMIT, Authenticator::WINDOW) ||
+        if Throttle.blocked?(conn, sign_in_key, now, Authenticator::PAIR_LIMIT, Authenticator::WINDOW) ||
            Throttle.blocked?(conn, change_key, now, LIMIT, WINDOW)
           return ChangeRequestOutcome.new(THROTTLED)
         end

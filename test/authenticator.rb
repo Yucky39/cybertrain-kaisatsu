@@ -129,6 +129,41 @@ test "one address cannot lock out every account: the ip limit is higher" do
   conn.close
 end
 
+test "a stranger at another address cannot lock the owner out" do
+  conn = fresh_conn
+  auth = K::Authenticator.new(directory)
+  20.times { auth.login(conn, "taro@example.com", "bad password!", "10.0.0.9", 1000) }
+  assert_equal "throttled", auth.login(conn, "taro@example.com", "bad password!", "10.0.0.9", 1001).status
+  assert auth.login(conn, "taro@example.com", "correct horse battery", "192.168.1.5", 1002).ok?
+  conn.close
+end
+
+test "guessing spread over many addresses still hits the account limit" do
+  conn = fresh_conn
+  auth = K::Authenticator.new(directory)
+  50.times { |i| auth.login(conn, "taro@example.com", "bad password!", "10.0.1." + i.to_s, 1000) }
+  assert_equal "throttled", auth.login(conn, "taro@example.com", "correct horse battery", "192.168.1.5", 1001).status
+  conn.close
+end
+
+test "sign-in sweeps expired counters, sessions and tokens once a minute" do
+  conn = fresh_conn
+  auth = K::Authenticator.new(directory)
+  auth.login(conn, "nobody@example.com", "bad password!", "10.0.0.1", 1000)
+  old = K::ServerSessions.open_session(conn, "9", 1000, 10)
+  K::TokenStore.save_token(conn, "9", K::TokenStore::PURPOSE_RESET, 1000, 10)
+  # 1501 is not a multiple of 60: no sweep yet, the counters pile up (3 + 2).
+  auth.login(conn, "taro@example.com", "bad password!", "10.0.0.1", 1501)
+  assert_equal 5, conn.execute("SELECT COUNT(*) AS n FROM kaisatsu_attempts")[0]["n"]
+  # 3600 is a multiple of 60 and every window above is long over: only this try's 3 remain.
+  auth.login(conn, "taro@example.com", "bad password!", "10.0.0.1", 3600)
+  assert_equal 3, conn.execute("SELECT COUNT(*) AS n FROM kaisatsu_attempts")[0]["n"]
+  assert_equal 0, conn.execute("SELECT COUNT(*) AS n FROM kaisatsu_tokens")[0]["n"]
+  assert_equal 0, conn.execute("SELECT COUNT(*) AS n FROM kaisatsu_sessions")[0]["n"]
+  assert_equal "", K::ServerSessions.resolve_user(conn, old, 3600)
+  conn.close
+end
+
 test "an old hash is replaced after a successful login" do
   conn = fresh_conn
   d = directory

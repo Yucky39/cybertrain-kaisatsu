@@ -33,6 +33,21 @@ module Cybertrain
         nil
       end
 
+      # Counts one attempt against the key and says whether it may go ahead:
+      # the first `limit` attempts inside the window do, later ones do not.
+      # For limits that count every try, not only the failures (sign-up).
+      def self.hit(conn, key, now, limit, window)
+        return false if blocked?(conn, key, now, limit, window)
+        note_failure(conn, key, now, window)
+        true
+      end
+
+      # Drops the counters whose window has ended: they no longer block anyone.
+      def self.purge_expired(conn, now, window)
+        conn.execute("DELETE FROM kaisatsu_attempts WHERE window_start <= ?", [now - window])
+        nil
+      end
+
       def self.clear(conn, key)
         conn.execute("DELETE FROM kaisatsu_attempts WHERE bucket = ?", [key_digest(key)])
         nil

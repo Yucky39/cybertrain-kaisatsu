@@ -41,7 +41,7 @@ end
 | --- | --- |
 | **Passwords** | PBKDF2-HMAC-SHA256, 600,000 iterations (about 0.5 s under Spinel). The stored form carries its parameters, so raising the count later re-hashes at the next sign-in. 8 to 1024 bytes, no NUL. |
 | **Sessions** | The cookie holds only a random id; the database holds its digest. Signing out, or changing a password or an address, ends sessions on the server at once, and a forged cookie grants nothing. Fourteen days. |
-| **Sign-in limits** | 5 failures per account and 20 per address in 15 minutes, then HTTP 429. A wrong password and an unknown account get the same answer and take the same time. |
+| **Sign-in limits** | 5 failures from one address against one account, 50 against one account from all addresses, and 20 from one address, in 15 minutes, then HTTP 429. Sign-up is limited to 10 tries per address in 15 minutes. Expired counters, sessions and tokens are swept on sign-in. A wrong password and an unknown account get the same answer and take the same time. |
 | **E-mail confirmation** | A link valid for three days. Opening it only shows a button; pressing the button confirms. |
 | **Password reset** | A one-hour, single-use link, sent only to a confirmed address. The answer is the same for any address; requests are limited per account and per address. A weak new password does not spend the link; success ends every session. |
 | **Changing the address** | Needs the current password. A link goes to the *new* address and a notice to the old one. On confirming, every session and every outstanding link ends. An address already in use looks like success and sends nothing. |
@@ -73,12 +73,11 @@ The web application only writes each message to a spool directory; a separate pr
 - Two Spinel / CyberTrain problems found while building this were reported upstream and are fixed in CyberTrain v0.3.1: class-variable arrays sharing storage after a GC in the test harness ([#1](https://github.com/Yucky39/cybertrain-kaisatsu/issues/1), [CyberTrain#26](https://github.com/saeki-mototsune/CyberTrain/issues/26)), and `require "openssl"` breaking the web server ([#2](https://github.com/Yucky39/cybertrain-kaisatsu/issues/2), [CyberTrain#27](https://github.com/saeki-mototsune/CyberTrain/issues/27)).
 - The request log of CyberTrain contains the path of a mailed link (`/password/reset/<token>`). Tokens are single-use and expire, but treat the log as sensitive.
 - Behind a reverse proxy on the same machine, set `CYBERTRAIN_TRUSTED_PROXY=1` (see [docs/install.md](docs/install.md)). Without it every visitor shares the proxy's address in the sign-in limits, and one person's failed attempts can lock everyone out.
-- Five failed sign-ins lock an account for 15 minutes, so anyone who knows an address can keep that person out for a while ([#6](https://github.com/Yucky39/cybertrain-kaisatsu/issues/6)).
-- Sign-up says when an address is already taken, so it can be used to find out who has an account, and it has no attempt limit ([#5](https://github.com/Yucky39/cybertrain-kaisatsu/issues/5)). Sign-in and password reset answer the same for any address.
-- Old sign-in attempt records and expired tokens are never deleted ([#3](https://github.com/Yucky39/cybertrain-kaisatsu/issues/3)).
-- With `--postal`, an unset `KAISATSU_MAIL_FROM` still falls back to printing mail to the log, links included. Set it in production ([#4](https://github.com/Yucky39/cybertrain-kaisatsu/issues/4)).
+- Five failed sign-ins from one address lock that address out of that account for 15 minutes; 50 from all addresses together lock the account itself, so a determined, widely spread attacker who knows an address can still keep its owner out for a while ([#6](https://github.com/Yucky39/cybertrain-kaisatsu/issues/6)).
+- Sign-up says when an address is already taken, so it can be used to find out who has an account (ten tries per address in 15 minutes). Sign-in and password reset answer the same for any address ([#5](https://github.com/Yucky39/cybertrain-kaisatsu/issues/5)).
+- Without `--postal`, mail is only printed to the log, links included. With `--postal`, `KAISATSU_MAIL_FROM` must be set when `CYBERTRAIN_ENV=production`; the first mail is refused with an error otherwise, instead of being printed.
 - The signed-in user's id is also kept in the signed session cookie; a controller that does not run `Gate.resolve` can treat a revoked session as signed in ([#7](https://github.com/Yucky39/cybertrain-kaisatsu/issues/7)).
-- Sessions only end at 14 days; there is no idle timeout, and the old address gets a notice but no undo link after an email change ([#9](https://github.com/Yucky39/cybertrain-kaisatsu/issues/9)).
+- After an email change the old address gets a notice but no undo link ([#9](https://github.com/Yucky39/cybertrain-kaisatsu/issues/9)).
 - Mail has only been tried against Mailpit, not a real provider (see cybertrain-postal's Known limits).
 
 ## Documentation

@@ -4,7 +4,10 @@ ok   a wrong password and an unknown account get the same answer
 ok   repeated failures throttle the account, even for the right password
 ok   a successful login resets the account's failure count
 ok   one address cannot lock out every account: the ip limit is higher
+ok   a stranger at another address cannot lock the owner out
+ok   guessing spread over many addresses still hits the account limit
+ok   sign-in sweeps expired counters, sessions and tokens once a minute
 ok   an old hash is replaced after a successful login
 ok   changing the password ends every session and the old password stops working
 ok   a password that breaks the policy is refused and nothing changes
-9 tests, 22 assertions, 0 failures
+12 tests, 30 assertions, 0 failures

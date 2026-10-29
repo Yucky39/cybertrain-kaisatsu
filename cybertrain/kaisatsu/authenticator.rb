@@ -2,6 +2,7 @@ require "cybertrain/kaisatsu/password_hash"
 require "cybertrain/kaisatsu/user_directory"
 require "cybertrain/kaisatsu/server_sessions"
 require "cybertrain/kaisatsu/throttle"
+require "cybertrain/kaisatsu/token_store"
 
 module Cybertrain
   module Kaisatsu
@@ -31,10 +32,20 @@ module Cybertrain
       INVALID = "invalid"
       THROTTLED = "throttled"
 
-      ACCOUNT_LIMIT = 5
+      # Failures one address may cause for one account, then for any account.
+      # ACCOUNT_LIMIT counts the failures from every address together: it only
+      # stops guessing spread over many addresses, so that a stranger who
+      # knows an e-mail address cannot lock its owner out from one address.
+      PAIR_LIMIT = 5
+      ACCOUNT_LIMIT = 50
       IP_LIMIT = 20
       WINDOW = 900
-      SESSION_TTL = 1_209_600
+      # A session ends after ServerSessions::ABSOLUTE_TTL whatever happens, and
+      # after IDLE_TTL without a request.
+      IDLE_TTL = ServerSessions::IDLE_TTL
+      # Expired rows are swept in the sign-in path, on the requests that arrive
+      # in the first second of each minute (no timer in the web process).
+      PURGE_EVERY = 60
 
       def initialize(directory)
         @directory = directory
@@ -43,8 +54,11 @@ module Cybertrain
       def login(conn, login, password, ip, now)
         name = login.strip.downcase
         account_key = "account:" + name
+        pair_key = "pair:" + name + "|" + ip
         ip_key = "ip:" + ip
-        if Throttle.blocked?(conn, account_key, now, ACCOUNT_LIMIT, WINDOW) ||
+        purge_expired(conn, now) if now % PURGE_EVERY == 0
+        if Throttle.blocked?(conn, pair_key, now, PAIR_LIMIT, WINDOW) ||
+           Throttle.blocked?(conn, account_key, now, ACCOUNT_LIMIT, WINDOW) ||
            (ip.bytesize > 0 && Throttle.blocked?(conn, ip_key, now, IP_LIMIT, WINDOW))
           return LoginResult.new(THROTTLED, "", "")
         end
@@ -58,17 +72,28 @@ module Cybertrain
         end
 
         unless verified
+          Throttle.note_failure(conn, pair_key, now, WINDOW)
           Throttle.note_failure(conn, account_key, now, WINDOW)
           Throttle.note_failure(conn, ip_key, now, WINDOW) if ip.bytesize > 0
           return LoginResult.new(INVALID, "", "")
         end
 
+        Throttle.clear(conn, pair_key)
         Throttle.clear(conn, account_key)
         if PasswordHash.needs_rehash?(creds.password_hash) && PasswordHash.policy_error(password).empty?
           @directory.store_password_hash(creds.user_id, PasswordHash.create(password))
         end
-        sid = ServerSessions.open_session(conn, creds.user_id, now, SESSION_TTL)
+        sid = ServerSessions.open_session(conn, creds.user_id, now, IDLE_TTL)
         LoginResult.new(OK, creds.user_id, sid)
+      end
+
+      # Removes what has expired: sign-in counters, sessions, used or expired
+      # tokens.
+      def purge_expired(conn, now)
+        Throttle.purge_expired(conn, now, WINDOW)
+        ServerSessions.purge_expired(conn, now)
+        TokenStore.purge_expired_tokens(conn, now)
+        nil
       end
 
       def logout(conn, session_id)

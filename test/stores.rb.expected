@@ -1,5 +1,6 @@
 ok   Schema.install is idempotent
 ok   a server session resolves to its user until it expires
+ok   using a session moves its expiry forward, but never past the absolute limit
 ok   the session id itself is never stored
 ok   closing one session leaves the others, closing all ends every one
 ok   a token is spent by its first use only
@@ -8,4 +9,6 @@ ok   issuing a new token voids the earlier one of the same purpose
 ok   throttle blocks at the limit and releases after the window
 ok   a failure after the window starts a new count; clear forgets
 ok   throttle keys are stored as digests
-10 tests, 29 assertions, 0 failures
+ok   Throttle.hit lets the first attempts through and counts every one
+ok   Throttle.purge_expired drops the counters whose window is over, and only those
+13 tests, 42 assertions, 0 failures
