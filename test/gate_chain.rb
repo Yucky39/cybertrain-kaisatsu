@@ -141,6 +141,18 @@ test "a forged user id in the cookie session grants nothing" do
   assert_equal "anonymous", res.body
 end
 
+test "a route that skips the Gate middleware still sees a revoked session as signed out" do
+  bare = Cybertrain::Router.new
+  bare.get("/me") { |ctx| handle_me(ctx) }
+  bare_app = Cybertrain::SessionStore.new(bare, secret: "gate-chain-secret")
+  client = Cybertrain::Test::Client.new(app)
+  cookie = sign_in(client).cookies[0].split(";")[0]
+  other = Cybertrain::Test::Client.new(bare_app)
+  assert_equal "user 1", other.request("GET", "/me", "", { "cookie" => cookie }).body
+  Cybertrain::DB.with { |conn| K::ServerSessions.close_all_for(conn, "1") }
+  assert_equal "anonymous", other.request("GET", "/me", "", { "cookie" => cookie }).body
+end
+
 test "hashing a password while the app is serving does not disturb routing" do
   stored = K::PasswordHash.create("another good password")
   assert K::PasswordHash.verify("another good password", stored)

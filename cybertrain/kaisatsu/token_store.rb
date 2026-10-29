@@ -9,6 +9,7 @@ module Cybertrain
       PURPOSE_RESET = "password_reset"
       PURPOSE_VERIFY = "email_verify"
       PURPOSE_CHANGE = "email_change"
+      PURPOSE_REVERT = "email_revert"
 
       # Issues a token for the user and returns the raw value to send out.
       # An earlier unused token of the same purpose is invalidated.
@@ -48,6 +49,12 @@ module Cybertrain
           [Token.digest_of(raw), purpose, now]
         )
         rows.empty? ? "" : rows[0]["user_id"].to_s
+      end
+
+      # Voids the user's outstanding tokens of one purpose.
+      def self.void_purpose(conn, user_id, purpose)
+        conn.execute("DELETE FROM kaisatsu_tokens WHERE user_id = ? AND purpose = ?", [user_id, purpose])
+        nil
       end
 
       # Voids every outstanding token of the user (after the sign-in address

@@ -37,7 +37,7 @@ Dir.mktmpdir do |root|
   read = ->(f) { File.read(File.join(root, f)) }
 
   check "first run creates the migrations, model, controllers and views",
-        first.count { |l| l.start_with?("create") } == 20
+        first.count { |l| l.start_with?("create") } == 21
   check "second run changes nothing", second.none? { |l| l.start_with?("create", "update") }
   check "migrations sort users, then the Kaisatsu tables, then the verified column",
         Dir.glob(File.join(root, "db/migrate/*")).sort.map { |f| File.basename(f).sub(/\A\d+_/, "") } ==
@@ -51,8 +51,8 @@ Dir.mktmpdir do |root|
         controller.include?("def record_not_found") && controller.include?("def require_login") &&
         controller.scan(/^  private$/).size == 1
   routes = read.("config/routes.rb")
-  check "routes keep the root and gain seventeen named routes",
-        routes.include?(%(root "home#index")) && routes.scan(/as: "/).size == 17 && routes.rstrip.end_with?("end")
+  check "routes keep the root and gain nineteen named routes",
+        routes.include?(%(root "home#index")) && routes.scan(/as: "/).size == 19 && routes.rstrip.end_with?("end")
   check "generated Ruby parses", Dir.glob(File.join(root, "{app,db,config}/**/*.rb")).all? do |f|
     system(RbConfig.ruby, "-c", f, out: File::NULL, err: File::NULL)
   end
@@ -78,8 +78,10 @@ Dir.mktmpdir do |root|
   setup = File.read(File.join(root, "app/models/mail_setup.rb"))
   check "--postal adds the postal dependency once, from git",
         toml.scan(/^cybertrain-postal =/).size == 1 && toml.include?("Yucky39/cybertrain-postal")
-  check "both git dependencies are pinned to the v0.0.2 tag, not a branch",
-        toml.scan(/ref = "v0\.0\.2"/).size == 2 && !toml.include?(%(ref = "main"))
+  check "both git dependencies are pinned to a tag, not a branch",
+        toml.include?(%(cybertrain-kaisatsu = { git = "https://github.com/Yucky39/cybertrain-kaisatsu", ref = "v0.0.3" })) &&
+        toml.include?(%(cybertrain-postal = { git = "https://github.com/Yucky39/cybertrain-postal", ref = "v0.0.2" })) &&
+        !toml.include?(%(ref = "main"))
   check "--postal requires postal once, after kaisatsu",
         app.scan(%(require "cybertrain/postal")).size == 1 && app.index("kaisatsu") < app.index("postal")
   check "--postal writes the mail worker, which is the only file that links OpenSSL",

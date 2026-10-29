@@ -58,6 +58,8 @@ module Cybertrain
       TAKEN = "taken"
 
       TTL = 86_400
+      # How long the old address can undo a change.
+      REVERT_TTL = 604_800
       LIMIT = 3
       WINDOW = 3600
 
@@ -69,6 +71,10 @@ module Cybertrain
 
       def link_for(raw)
         @base_url + "/email/change/" + raw
+      end
+
+      def revert_link_for(raw)
+        @base_url + "/email/revert/" + raw
       end
 
       # A cheap shape check; the real proof is the mail that arrives.
@@ -113,6 +119,8 @@ module Cybertrain
         Throttle.note_failure(conn, change_key, now, WINDOW)
 
         return ChangeRequestOutcome.new(ACCEPTED) if @directory.email_taken?(target, user_id)
+        # A new request replaces what an undo link would restore.
+        TokenStore.void_purpose(conn, user_id, TokenStore::PURPOSE_REVERT)
         @directory.begin_email_change(user_id, target)
         raw = TokenStore.save_token(conn, user_id, TokenStore::PURPOSE_CHANGE, now, TTL)
         @notifier.send_email_change_link(target, link_for(raw))
@@ -130,12 +138,40 @@ module Cybertrain
         old_email = @directory.email_for(user_id)
         pending = @directory.pending_email(user_id)
         return ChangeOutcome.new(INVALID_TOKEN) if pending.empty?
+        old_confirmed = @directory.email_verified?(user_id)
         return ChangeOutcome.new(TAKEN) unless @directory.apply_email_change(user_id)
         # Everything issued before the change belonged to the old address: other
         # sessions, and reset or confirmation links sitting in the old mailbox.
         ServerSessions.close_all_for(conn, user_id)
         TokenStore.void_tokens(conn, user_id)
-        @notifier.send_email_changed(old_email, pending) if old_email.bytesize > 0
+        if old_email.bytesize > 0 && old_confirmed
+          # The old address, which the owner may still hold when someone else
+          # made the change, can undo it for a week. Until then the old address
+          # waits in the pending slot (nothing else uses it: a token to change
+          # to it needs a new request, which overwrites it).
+          @directory.begin_email_change(user_id, old_email)
+          undo = TokenStore.save_token(conn, user_id, TokenStore::PURPOSE_REVERT, now, REVERT_TTL)
+          @notifier.send_email_change_undo(old_email, pending, revert_link_for(undo))
+        elsif old_email.bytesize > 0
+          @notifier.send_email_changed(old_email, pending)
+        end
+        ChangeOutcome.new(DONE)
+      end
+
+      def revert_valid?(conn, raw, now)
+        TokenStore.peek_token(conn, raw, TokenStore::PURPOSE_REVERT, now).bytesize > 0
+      end
+
+      # Puts the old address back, ends every session and voids every link: the
+      # change may have been made by someone who held the session and the
+      # password, so the owner should then reset the password too.
+      def revert_change(conn, raw, now)
+        user_id = TokenStore.consume_token(conn, raw, TokenStore::PURPOSE_REVERT, now)
+        return ChangeOutcome.new(INVALID_TOKEN) if user_id.empty?
+        return ChangeOutcome.new(INVALID_TOKEN) if @directory.pending_email(user_id).empty?
+        return ChangeOutcome.new(TAKEN) unless @directory.apply_email_change(user_id)
+        ServerSessions.close_all_for(conn, user_id)
+        TokenStore.void_tokens(conn, user_id)
         ChangeOutcome.new(DONE)
       end
     end

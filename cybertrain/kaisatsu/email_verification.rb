@@ -47,15 +47,39 @@ module Cybertrain
         @base_url + "/email/verify/" + raw
       end
 
+      # Counts a request against the per-account and per-address limits and says
+      # whether it may go ahead.
+      def allowed?(conn, name, ip, now)
+        account_key = "verify:" + name
+        ip_key = "verify-ip:" + ip
+        return false if Throttle.blocked?(conn, account_key, now, ACCOUNT_LIMIT, WINDOW)
+        return false if ip.bytesize > 0 && Throttle.blocked?(conn, ip_key, now, IP_LIMIT, WINDOW)
+        Throttle.note_failure(conn, account_key, now, WINDOW)
+        Throttle.note_failure(conn, ip_key, now, WINDOW) if ip.bytesize > 0
+        true
+      end
+
+      # Someone signed up with an address that already has an account. The
+      # caller answers exactly as for a new account, so the form does not reveal
+      # who has one; this mails the owner instead. A confirmed account gets a
+      # notice with the "forgot password" link; one still unconfirmed gets its
+      # confirmation link again. Returns nothing.
+      def signup_again(conn, email, ip, now)
+        name = email.strip.downcase
+        creds = @directory.credentials_for(name)
+        if creds.found && @directory.email_verified?(creds.user_id)
+          if allowed?(conn, name, ip, now)
+            @notifier.send_signup_existing(name, @base_url + "/password/forgot")
+          end
+          return nil
+        end
+        request_verification(conn, name, ip, now)
+      end
+
       # Returns nothing: the caller answers the same way in every case.
       def request_verification(conn, email, ip, now)
         name = email.strip.downcase
-        account_key = "verify:" + name
-        ip_key = "verify-ip:" + ip
-        return nil if Throttle.blocked?(conn, account_key, now, ACCOUNT_LIMIT, WINDOW)
-        return nil if ip.bytesize > 0 && Throttle.blocked?(conn, ip_key, now, IP_LIMIT, WINDOW)
-        Throttle.note_failure(conn, account_key, now, WINDOW)
-        Throttle.note_failure(conn, ip_key, now, WINDOW) if ip.bytesize > 0
+        return nil unless allowed?(conn, name, ip, now)
 
         creds = @directory.credentials_for(name)
         return nil unless creds.found

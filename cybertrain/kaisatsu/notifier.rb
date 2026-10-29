@@ -30,8 +30,21 @@ module Cybertrain
         nil
       end
 
+      # To the OLD address, after a change that can be undone: the address was
+      # changed to new_email, and the link puts the old one back (valid for a week).
+      def send_email_change_undo(old_email, new_email, link)
+        nil
+      end
+
       # A security notice after a password was changed or reset.
       def send_password_changed(email)
+        nil
+      end
+
+      # To the owner of an address somebody tried to sign up with again. The
+      # person who tried is told nothing different from a successful sign-up;
+      # link leads to "forgot password".
+      def send_signup_existing(email, link)
         nil
       end
     end
@@ -65,6 +78,18 @@ module Cybertrain
 
       def send_email_changed(old_email, new_email)
         puts "[kaisatsu] #{old_email}: the address was changed to #{new_email}"
+        STDOUT.flush
+        nil
+      end
+
+      def send_email_change_undo(old_email, new_email, link)
+        puts "[kaisatsu] #{old_email}: the address was changed to #{new_email}; undo: #{link}"
+        STDOUT.flush
+        nil
+      end
+
+      def send_signup_existing(email, link)
+        puts "[kaisatsu] #{email}: someone tried to sign up again; forgot password: #{link}"
         STDOUT.flush
         nil
       end

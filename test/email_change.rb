@@ -107,6 +107,17 @@ class ChangeNotifier < K::Notifier
     nil
   end
 
+  def send_email_change_undo(old_email, new_email, link)
+    @log << ("undo:" + old_email + ":" + link.split("/")[-1] + ":" + new_email)
+    nil
+  end
+
+  def last_undo_token
+    last = ""
+    @log.each { |e| last = e.split(":")[2] if e.start_with?("undo:") }
+    last
+  end
+
   def entries
     @log
   end
@@ -166,8 +177,82 @@ test "the address changes only when the button is pressed, once" do
   assert_equal "new@example.com", c.book.email_for("1")
   assert c.book.email_verified?("1")
   assert_equal "invalid_token", c.change.complete_change(c.conn, token, 1102).status
+  # The old address was confirmed, so its notice carries an undo link.
+  assert_equal 0, c.notifier.count_of("changed")
+  assert_equal 1, c.notifier.count_of("undo")
+  assert c.notifier.entries[-1].start_with?("undo:taro@example.com:")
+  assert c.notifier.entries[-1].end_with?(":new@example.com")
+  c.conn.close
+end
+
+test "an old address that was never confirmed gets a plain notice and no undo link" do
+  c = Case.new
+  c.book.add("fresh@example.com", "fresh good password", false)
+  c.change.request_change(c.conn, "3", "next@example.com", "fresh good password", 1000)
+  c.change.complete_change(c.conn, c.notifier.last_token, 1001)
   assert_equal 1, c.notifier.count_of("changed")
-  assert_equal "changed:taro@example.com:new@example.com", c.notifier.entries[-1]
+  assert_equal 0, c.notifier.count_of("undo")
+  c.conn.close
+end
+
+def changed_case
+  c = Case.new
+  c.change.request_change(c.conn, "1", "new@example.com", "old good password", 1000)
+  c.change.complete_change(c.conn, c.notifier.last_token, 1001)
+  c
+end
+
+test "the undo link puts the old address back, once, and ends every session" do
+  c = changed_case
+  undo = c.notifier.last_undo_token
+  assert c.change.revert_valid?(c.conn, undo, 1100)
+  assert_equal "new@example.com", c.book.email_for("1")
+  now_signed_in = c.auth.login(c.conn, "new@example.com", "old good password", "", 1101)
+  assert c.change.revert_change(c.conn, undo, 1102).done?
+  assert_equal "taro@example.com", c.book.email_for("1")
+  assert c.book.email_verified?("1")
+  assert_equal "", K::ServerSessions.resolve_user(c.conn, now_signed_in.session_id, 1103)
+  assert_equal "invalid_token", c.change.revert_change(c.conn, undo, 1104).status
+  assert c.auth.login(c.conn, "taro@example.com", "old good password", "", 1105).ok?
+  assert_equal "invalid", c.auth.login(c.conn, "new@example.com", "old good password", "", 1106).status
+  c.conn.close
+end
+
+test "the undo link expires after a week" do
+  c = changed_case
+  undo = c.notifier.last_undo_token
+  refute c.change.revert_valid?(c.conn, undo, 1001 + 604_800 + 1)
+  assert_equal "invalid_token", c.change.revert_change(c.conn, undo, 1001 + 604_800 + 1).status
+  assert_equal "new@example.com", c.book.email_for("1")
+  c.conn.close
+end
+
+test "a new change request voids the undo link" do
+  c = changed_case
+  undo = c.notifier.last_undo_token
+  c.auth.login(c.conn, "new@example.com", "old good password", "", 1100)
+  c.change.request_change(c.conn, "1", "third@example.com", "old good password", 1101)
+  refute c.change.revert_valid?(c.conn, undo, 1102)
+  assert_equal "invalid_token", c.change.revert_change(c.conn, undo, 1102).status
+  assert_equal "new@example.com", c.book.email_for("1")
+  c.conn.close
+end
+
+test "the undo link cannot be used as any other kind of link, nor the reverse" do
+  c = changed_case
+  undo = c.notifier.last_undo_token
+  assert_equal "invalid_token", c.change.complete_change(c.conn, undo, 1100).status
+  c.change.request_change(c.conn, "1", "next@example.com", "old good password", 1100)
+  assert_equal "invalid_token", c.change.revert_change(c.conn, c.notifier.last_token, 1101).status
+  c.conn.close
+end
+
+test "the undo fails, changing nothing, when the old address was taken meanwhile" do
+  c = changed_case
+  undo = c.notifier.last_undo_token
+  c.book.add("taro@example.com", "someone else password", true)
+  assert_equal "taken", c.change.revert_change(c.conn, undo, 1100).status
+  assert_equal "new@example.com", c.book.email_for("1")
   c.conn.close
 end
 

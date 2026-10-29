@@ -8,7 +8,7 @@ cybertrain db migrate
 cybertrain server
 ```
 
-`--path` を省略すると、`spin.toml` の依存は GitHub のタグ `v0.0.2` を指す(`--ref` で別のタグやブランチも指定できる)。
+`--path` を省略すると、`spin.toml` の依存は GitHub のタグ(kaisatsu は `v0.0.3`、postal は `v0.0.2`)を指す(`--ref` で別のタグやブランチも指定できる)。
 
 ### リバースプロキシの後ろに置くとき
 
@@ -36,8 +36,8 @@ cybertrain server
 - `spin.toml`: `cybertrain-kaisatsu` の依存を追加。
 - `config/app.rb`: 先頭に `require "cybertrain/kaisatsu/full"`。
 - `app/controllers/application_controller.rb`: `before_action { |c| Cybertrain::Kaisatsu::Gate.resolve(c.ctx) }`(毎リクエスト、セッション ID を DB で確認する)と、`signed_in?` / `current_user_id` / `require_login`。
-  ログイン中のユーザー ID は署名付き Cookie にも写されるので、`ApplicationController` を継承しない(`Gate.resolve` を通らない)コントローラでは、失効したセッションがログイン済みに見えることがある。認証が要るコントローラは必ず `ApplicationController` を継承するか、自分で `Gate.resolve` を呼ぶ。
-- `config/routes.rb`: 17 本のルート(足りない分だけを足す)。
+  ログイン中のユーザーは、リクエストごとにセッション ID をデータベースで確認して求め、コントローラの中だけに持つ(Cookie には写さない)。`ApplicationController` を継承しない(`before_action` を通らない)コントローラでは、誰もログインしていないものとして扱われる。
+- `config/routes.rb`: 19 本のルート(足りない分だけを足す)。
 
 既存のファイルが想定の形でないときは、`MANUAL` と表示される。上の内容を手で足す。
 
@@ -108,18 +108,22 @@ Accounts.email_verified?(current_user_id.to_i)   # 画面の案内や、機能�
 
 **すでに入れてあるアプリへの追加**: ファイルは上書きしない(`skip`)ので、新しい分だけが足される(移行、確認用のコントローラとビュー、ルート)。ただし、既存の `accounts.rb`(`email_verified?` / `mark_email_verified` / `Accounts.email_verification`)と `registrations_controller.rb`(登録直後の送信)は、`kaisatsu install` では更新されない。ファイルを一度退避して入れ直すか、`cybertrain/kaisatsu/cli/templates.rb` の内容を手で足す。**既存のユーザーは全員「未確認」になる**ので、再設定を使う前に、確認のリンクを要求してもらう必要がある。
 
+**v0.0.3 で変わった生成コード**: `application_controller.rb`(ユーザーの確認を `before_action :resolve_kaisatsu_session` にし、Cookie に ID を写さない)、`registrations_controller.rb`(登録済みのアドレスでも同じ応答にし、持ち主にメールする)、`email_changes_controller.rb` とそのビュー・ルート(取り消しリンク)、`accounts.rb` と `mail_setup.rb`(`send_email_change_undo` / `send_signup_existing`)。入れ済みのアプリでは自動では更新されないので、`cybertrain/kaisatsu/cli/templates.rb` と見比べて手で反映する。
+
 ## メールアドレスの変更
 
 ログイン中のユーザーが、`/account/email` で新しいアドレスと**現在のパスワード**を入れる。
 
 1. その時点では何も変わらない。**新しいアドレス**に確認のリンク(1 日有効、1 回限り)を送り、**古いアドレス**(確認済みのときだけ)に「変更が依頼された」と知らせる。
 2. リンクを開くとボタンだけが出る(開いただけでは変わらない)。ボタンを押すと、アドレスが入れ替わり、新しいアドレスは確認済みになる。
-3. 変更が済むと、そのアカウントの**すべてのセッションを終了**し、**未使用のリンク(再設定・確認)をすべて無効にする**(古いメールボックスに残ったリンクが使えないように)。古いアドレスに「変更された」と知らせる。新しいアドレスで入り直す。
+3. 変更が済むと、そのアカウントの**すべてのセッションを終了**し、**未使用のリンク(再設定・確認)をすべて無効にする**(古いメールボックスに残ったリンクが使えないように)。古いアドレス(確認済みのときだけ)に「変更された」と知らせ、**1 週間有効の取り消しリンク**を付ける。新しいアドレスで入り直す。
+4. 取り消しリンクを開くとボタンだけが出る。押すと古いアドレスが戻り、すべてのセッションとリンクが無効になり、パスワードの再設定へ案内する(他人が変えた場合、パスワードも知られている可能性があるため)。新しい変更の依頼を出すと、取り消しリンクは無効になる。
 
 守っていること:
 
 - パスワードを間違えても何も起きない。間違いはログインと同じカウンターに数え、5 回/15 分で止まる。このフォームでパスワードを推測できない。
 - 新しいアドレスが他のアカウントに使われていても、応答は成功のときと同じで、メールは送らない(誰がアカウントを持っているかを、ログイン中の人にも教えない)。確認のボタンを押す時点でも、重複を調べ直す(`users.email` の一意インデックスが最後の砦)。
+- 取り消しリンクは、古いアドレスが確認済みだったときだけ作る。取り消し先のアドレスが、その間に別のアカウントに使われたときは、何も変えない。
 - 変更の依頼は、ユーザーごとに 3 回/時間まで。新しい依頼を出すと、古いリンクは無効になる。
 
 ## メールを送る(`--postal`)

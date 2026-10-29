@@ -6,12 +6,15 @@ module Cybertrain
   module Kaisatsu
     # The turnstile (改札口). Put it right after SessionStore in the stack:
     # on every request it checks the session id in the cookie session against
-    # the database and publishes the signed-in user id, or removes both keys
-    # when the id is unknown, expired or ended. Controllers read the user
-    # through Gate.user_id / Gate.signed_in?; nothing else in the cookie is
-    # trusted for identity, so ending a server session takes effect at once.
+    # the database. The cookie carries only that random id; who is signed in is
+    # never copied into it, so ending a server session takes effect at once and
+    # a request that skips the check sees nobody signed in. Controllers get the
+    # user from Gate.resolve (the generated ApplicationController keeps it for
+    # the request); Gate.user_id / Gate.signed_in? ask the database again.
     class Gate < Middleware
       SID_KEY = "_kaisatsu_sid"
+      # Older versions copied the user id into the cookie under this key; it is
+      # removed when found and never read.
       UID_KEY = "_kaisatsu_uid"
 
       def call(ctx)
@@ -19,33 +22,25 @@ module Cybertrain
         super
       end
 
-      # The work of the middleware, callable on its own: a controller's
-      # before_action can run it where the stack cannot be changed
-      # (`before_action { |c| Cybertrain::Kaisatsu::Gate.resolve(c.ctx) }`).
+      # The user id of the live session in the cookie, "" when nobody is signed
+      # in. Removes the session id from the cookie when it is unknown, expired
+      # or ended. One database lookup per call: a controller's before_action
+      # calls it once (`@user_id = Cybertrain::Kaisatsu::Gate.resolve(ctx)`)
+      # where the stack cannot be changed.
       def self.resolve(ctx)
         session = ctx.session
-        return nil if session.nil?
+        return "" if session.nil?
+        session.delete(UID_KEY)
         sid = session[SID_KEY]
-        if sid.nil? || sid.empty?
-          session.delete(UID_KEY)
-        else
-          uid = DB.with { |conn| ServerSessions.resolve_user(conn, sid, Time.now.to_i) }
-          if uid.empty?
-            session.delete(SID_KEY)
-            session.delete(UID_KEY)
-          else
-            session[UID_KEY] = uid
-          end
-        end
-        nil
+        return "" if sid.nil? || sid.empty?
+        uid = DB.with { |conn| ServerSessions.resolve_user(conn, sid, Time.now.to_i) }
+        session.delete(SID_KEY) if uid.empty?
+        uid
       end
 
       # "" when nobody is signed in.
       def self.user_id(ctx)
-        session = ctx.session
-        return "" if session.nil?
-        uid = session[UID_KEY]
-        uid.nil? ? "" : uid
+        resolve(ctx)
       end
 
       def self.signed_in?(ctx)
@@ -54,13 +49,12 @@ module Cybertrain
 
       # Starts a signed-in session: replaces the cookie session's contents
       # (a fresh CSRF token, no leftovers from before sign-in: fixation) and
-      # stores the id Authenticator#login returned.
+      # stores the id Authenticator#login returned. user_id is not kept.
       def self.sign_in(ctx, session_id, user_id)
         session = ctx.session
         return nil if session.nil?
         session.clear
         session[SID_KEY] = session_id
-        session[UID_KEY] = user_id
         nil
       end
 

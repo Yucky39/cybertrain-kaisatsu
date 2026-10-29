@@ -74,10 +74,10 @@ The web application only writes each message to a spool directory; a separate pr
 - The request log of CyberTrain contains the path of a mailed link (`/password/reset/<token>`). Tokens are single-use and expire, but treat the log as sensitive.
 - Behind a reverse proxy on the same machine, set `CYBERTRAIN_TRUSTED_PROXY=1` (see [docs/install.md](docs/install.md)). Without it every visitor shares the proxy's address in the sign-in limits, and one person's failed attempts can lock everyone out.
 - Five failed sign-ins from one address lock that address out of that account for 15 minutes; 50 from all addresses together lock the account itself, so a determined, widely spread attacker who knows an address can still keep its owner out for a while ([#6](https://github.com/Yucky39/cybertrain-kaisatsu/issues/6)).
-- Sign-up says when an address is already taken, so it can be used to find out who has an account (ten tries per address in 15 minutes). Sign-in and password reset answer the same for any address ([#5](https://github.com/Yucky39/cybertrain-kaisatsu/issues/5)).
+- Sign-up answers the same whether or not the address already has an account (the same hash cost, the same message); the owner of an existing address is mailed instead. Form errors that do not depend on other accounts (blank address, weak password) are still shown, and sign-up is limited to ten tries per address in 15 minutes.
 - Without `--postal`, mail is only printed to the log, links included. With `--postal`, `KAISATSU_MAIL_FROM` must be set when `CYBERTRAIN_ENV=production`; the first mail is refused with an error otherwise, instead of being printed.
-- The signed-in user's id is also kept in the signed session cookie; a controller that does not run `Gate.resolve` can treat a revoked session as signed in ([#7](https://github.com/Yucky39/cybertrain-kaisatsu/issues/7)).
-- After an email change the old address gets a notice but no undo link ([#9](https://github.com/Yucky39/cybertrain-kaisatsu/issues/9)).
+- Who is signed in is looked up in the database on every request and kept for that request only; it is not copied into the cookie. A controller that does not run the generated `before_action` sees nobody signed in.
+- After an email change, the old address (if it was confirmed) gets a link that undoes it for a week.
 - Mail has only been tried against Mailpit, not a real provider (see cybertrain-postal's Known limits).
 
 ## Documentation

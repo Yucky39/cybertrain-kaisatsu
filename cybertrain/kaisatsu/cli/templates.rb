@@ -184,6 +184,14 @@ module Cybertrain
                   spawn_changed_notice(@inner, old_email, new_email)
                 end
 
+                def send_email_change_undo(old_email, new_email, link)
+                  spawn_change_undo(@inner, old_email, new_email, link)
+                end
+
+                def send_signup_existing(email, link)
+                  spawn_signup_existing(@inner, email, link)
+                end
+
                 def send_password_changed(email)
                   spawn_changed(@inner, email)
                 end
@@ -197,6 +205,16 @@ module Cybertrain
 
                 def spawn_change_requested(inner, old_email, new_email)
                   Thread.new { inner.send_email_change_requested(old_email, new_email) }
+                  nil
+                end
+
+                def spawn_change_undo(inner, old_email, new_email, link)
+                  Thread.new { inner.send_email_change_undo(old_email, new_email, link) }
+                  nil
+                end
+
+                def spawn_signup_existing(inner, email, link)
+                  Thread.new { inner.send_signup_existing(email, link) }
                   nil
                 end
 
@@ -371,12 +389,19 @@ module Cybertrain
                     flash.now[:alert] = problem
                     return render(:new_action, status: :unprocessable_entity)
                   end
-                  user = User.new(email: email, password_hash: Cybertrain::Kaisatsu::PasswordHash.create(password))
-                  unless user.save
-                    flash.now[:alert] = "The account could not be created"
-                    return render(:new_action, status: :unprocessable_entity)
+                  # The hash is made either way, so an address that already has an account
+                  # costs the same time; and the answer below is the same either way.
+                  hash = Cybertrain::Kaisatsu::PasswordHash.create(password)
+                  if User.where(email: email).first.nil?
+                    user = User.new(email: email, password_hash: hash)
+                    unless user.save
+                      flash.now[:alert] = "The account could not be created"
+                      return render(:new_action, status: :unprocessable_entity)
+                    end
+                    send_confirmation(email)
+                  else
+                    tell_owner(email)
                   end
-                  send_confirmation(email)
                   flash[:notice] = "Account created. We sent a link to confirm your email address. Please sign in."
                   redirect_to "/login", status: :see_other
                 end
@@ -389,6 +414,17 @@ module Cybertrain
                   Cybertrain::DB.with do |conn|
                     Cybertrain::Kaisatsu::Throttle.hit(conn, "signup:" + ip, now, 10, 900)
                   end
+                end
+
+                # The address already has an account: the owner is told by mail, the person
+                # at the form is not.
+                def tell_owner(email)
+                  ip = request.client_ip
+                  now = Time.now.to_i
+                  Cybertrain::DB.with do |conn|
+                    Accounts.email_verification.signup_again(conn, email, ip, now)
+                  end
+                  nil
                 end
 
                 # A Cybertrain::DB.with block cannot see the controller's request: bind first.
@@ -406,7 +442,6 @@ module Cybertrain
                   return "Email is not valid" unless email.include?("@") && email.length <= 254
                   policy = Cybertrain::Kaisatsu::PasswordHash.policy_error(password)
                   return "Password: " + policy unless policy.empty?
-                  return "Email is already taken" unless User.where(email: email).first.nil?
                   ""
                 end
               end
@@ -710,7 +745,45 @@ module Cybertrain
                   redirect_to "/login", status: :see_other
                 end
 
+                # GET /email/revert/:token
+                # The link in the notice to the OLD address. Opening it only shows a button.
+                def revert_form
+                  @token = params[:token].to_s
+                  unless revert_still_valid?(@token)
+                    flash[:alert] = "That link is invalid or has expired."
+                    return redirect_to("/login", status: :see_other)
+                  end
+                  response.set_header("Referrer-Policy", "no-referrer")
+                end
+
+                # POST /email/revert
+                def revert
+                  outcome = undo(params[:token].to_s)
+                  if outcome.done?
+                    flash[:notice] = "Your old email address is back and every session was ended. " \
+                                     "Someone may have had your password: reset it now."
+                    redirect_to "/password/forgot", status: :see_other
+                  else
+                    flash[:alert] = outcome.status == "taken" ? "That address is now used by another account, so nothing was changed." : "That link is invalid or has expired."
+                    redirect_to "/login", status: :see_other
+                  end
+                end
+
                 private
+
+                def revert_still_valid?(token)
+                  now = Time.now.to_i
+                  Cybertrain::DB.with do |conn|
+                    Accounts.email_change.revert_valid?(conn, token, now)
+                  end
+                end
+
+                def undo(token)
+                  now = Time.now.to_i
+                  Cybertrain::DB.with do |conn|
+                    Accounts.email_change.revert_change(conn, token, now)
+                  end
+                end
 
                 # Everything a Cybertrain::DB.with block needs is a local first: inside the block `self`
                 # is not the controller under Spinel.
@@ -756,6 +829,19 @@ module Cybertrain
                 </div>
               <% end %>
               <p><a href="/">Back</a></p>
+            EOS_KAISATSU
+          ],
+          [
+            "app/views/email_changes/revert_form.html.erb",
+            <<~'EOS_KAISATSU'
+              <h1>Put your old email address back</h1>
+              <p>The sign-in address of your account was changed. Press the button to undo it. Every signed-in session will end, and you will be asked to reset your password.</p>
+              <%= form_with(url: "/email/revert") do |f| %>
+                <%= f.hidden_field :token, value: @token %>
+                <div class="actions">
+                  <%= f.submit "Undo the change" %>
+                </div>
+              <% end %>
             EOS_KAISATSU
           ],
           [
@@ -849,6 +935,23 @@ module Cybertrain
                            "The sign-in address of this account was changed to another address, " \
                            "and every signed-in session was ended.\n\n" \
                            "If it was not you, contact the administrator at once.\n", 86400)
+            end
+
+            def send_email_change_undo(old_email, new_email, link)
+              enqueue_text(old_email, "Your sign-in address was changed",
+                           "The sign-in address of this account was changed to another address, " \
+                           "and every signed-in session was ended.\n\n" \
+                           "If it was you, you need do nothing. If it was not, open this link within " \
+                           "a week to put this address back, then reset your password:\n\n" +
+                           link + "\n", 604800)
+            end
+
+            def send_signup_existing(email, link)
+              enqueue_text(email, "Someone tried to sign up with your address",
+                           "Someone tried to create an account with this address, which already has one.\n\n" \
+                           "If it was you, just sign in. If you forgot your password, you can reset it:\n\n" +
+                           link + "\n\n" \
+                           "If it was not you, ignore this mail: nothing changed.\n", 259200)
             end
 
             def send_password_changed(email)
@@ -984,16 +1087,24 @@ module Cybertrain
 
         APPLICATION_CONTROLLER_BEFORE_ACTION = <<~'EOS_KAISATSU'.freeze
           # Kaisatsu: check the session id against the database on every request.
-          before_action { |c| Cybertrain::Kaisatsu::Gate.resolve(c.ctx) }
+          before_action :resolve_kaisatsu_session
         EOS_KAISATSU
 
         APPLICATION_CONTROLLER_HELPERS = <<~'EOS_KAISATSU'.freeze
+          # Who is signed in is looked up once per request and kept here, not in the
+          # cookie. A controller that does not inherit this one never runs it.
+          def resolve_kaisatsu_session
+            @kaisatsu_user_id = Cybertrain::Kaisatsu::Gate.resolve(ctx)
+            nil
+          end
+
           def signed_in?
-            Cybertrain::Kaisatsu::Gate.signed_in?(ctx)
+            current_user_id.bytesize > 0
           end
 
           def current_user_id
-            Cybertrain::Kaisatsu::Gate.user_id(ctx)
+            uid = @kaisatsu_user_id
+            uid.nil? ? "" : uid
           end
 
           # Use as: before_action :require_login
@@ -1022,6 +1133,8 @@ module Cybertrain
           post "/account/email", to: "email_changes#create", as: "create_change_email"
           get "/email/change/:token", to: "email_changes#edit", as: "confirm_email_change"
           post "/email/change", to: "email_changes#update", as: "update_email_change"
+          get "/email/revert/:token", to: "email_changes#revert_form", as: "revert_email_change_form"
+          post "/email/revert", to: "email_changes#revert", as: "revert_email_change"
         EOS_KAISATSU
 
         REQUIRE_LINE = %(require "cybertrain/kaisatsu/full"\n).freeze

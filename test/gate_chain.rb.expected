@@ -4,5 +4,6 @@ ok   a failed sign-in leaves the visitor anonymous
 ok   signing out ends the session on the server
 ok   ending every session of the user signs out a second browser at once
 ok   a forged user id in the cookie session grants nothing
+ok   a route that skips the Gate middleware still sees a revoked session as signed out
 ok   hashing a password while the app is serving does not disturb routing
-7 tests, 19 assertions, 0 failures
+8 tests, 21 assertions, 0 failures

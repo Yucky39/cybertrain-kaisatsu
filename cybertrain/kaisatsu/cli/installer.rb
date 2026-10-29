@@ -13,7 +13,9 @@ module Cybertrain
         REPOSITORY = "https://github.com/Yucky39/cybertrain-kaisatsu".freeze
         # The tag a new application depends on when --ref is not given. A branch
         # would move under the application between two builds.
-        DEFAULT_REF = "v0.0.2".freeze
+        DEFAULT_REF = "v0.0.3".freeze
+        # cybertrain-postal is tagged on its own.
+        POSTAL_DEFAULT_REF = "v0.0.2".freeze
 
         attr_reader :log
 
@@ -32,7 +34,7 @@ module Cybertrain
 
         def self.postal_dependency_for(path, ref)
           return %({ path = "#{File.expand_path(path)}" }) unless path.nil?
-          %({ git = "#{POSTAL_REPOSITORY}", ref = "#{ref || DEFAULT_REF}" })
+          %({ git = "#{POSTAL_REPOSITORY}", ref = "#{ref || POSTAL_DEFAULT_REF}" })
         end
 
         def self.dependency_for(path, git, ref)

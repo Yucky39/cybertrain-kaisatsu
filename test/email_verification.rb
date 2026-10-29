@@ -39,8 +39,24 @@ end
 class VerifyNotifier < K::Notifier
   def initialize
     @sent = 0
+    @existing = 0
+    @existing_link = ""
     @last_email = ""
     @last_link = ""
+  end
+
+  def send_signup_existing(email, link)
+    @existing += 1
+    @existing_link = link
+    nil
+  end
+
+  def existing
+    @existing
+  end
+
+  def existing_link
+    @existing_link
   end
 
   def send_email_verification(email, link)
@@ -101,6 +117,35 @@ test "an unknown account, and one that is already confirmed, get no mail" do
   w.directory.mark_email_verified("1")
   w.verification.request_verification(w.conn, "taro@example.com", "", 1001)
   assert_equal 0, w.notifier.sent
+  w.conn.close
+end
+
+test "signing up again with a confirmed address mails its owner a forgot-password link, not a confirmation" do
+  w = Setup.new
+  w.directory.mark_email_verified("1")
+  w.verification.signup_again(w.conn, "Taro@Example.com", "10.0.0.1", 1000)
+  assert_equal 1, w.notifier.existing
+  assert_equal "https://app.example.com/password/forgot", w.notifier.existing_link
+  assert_equal 0, w.notifier.sent
+  w.conn.close
+end
+
+test "signing up again with an unconfirmed address resends the confirmation; an unknown one mails nothing" do
+  w = Setup.new
+  w.verification.signup_again(w.conn, "taro@example.com", "10.0.0.1", 1000)
+  assert_equal 1, w.notifier.sent
+  assert_equal 0, w.notifier.existing
+  w.verification.signup_again(w.conn, "nobody@example.com", "10.0.0.1", 1001)
+  assert_equal 1, w.notifier.sent
+  assert_equal 0, w.notifier.existing
+  w.conn.close
+end
+
+test "signing up again is limited like a confirmation request" do
+  w = Setup.new
+  w.directory.mark_email_verified("1")
+  5.times { |i| w.verification.signup_again(w.conn, "taro@example.com", "10.0.0.1", 1000 + i) }
+  assert_equal 3, w.notifier.existing
   w.conn.close
 end
 
