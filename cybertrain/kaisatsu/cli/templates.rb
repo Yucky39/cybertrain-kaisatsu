@@ -966,7 +966,7 @@ module Cybertrain
             end
             report = runner.run_once(now)
             if report.delivered + report.deferred + report.failed > 0
-              puts "[mail_worker] delivered=#{report.delivered} deferred=#{report.deferred} failed=#{report.failed}"
+              puts "[mail_worker] delivered=#{report.delivered} deferred=#{report.deferred} failed=#{report.failed} refused=#{report.refused}"
               STDOUT.flush
             end
             if once

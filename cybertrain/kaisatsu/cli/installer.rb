@@ -13,7 +13,7 @@ module Cybertrain
         REPOSITORY = "https://github.com/Yucky39/cybertrain-kaisatsu".freeze
         # The tag a new application depends on when --ref is not given. A branch
         # would move under the application between two builds.
-        DEFAULT_REF = "v0.0.1".freeze
+        DEFAULT_REF = "v0.0.2".freeze
 
         attr_reader :log
 
