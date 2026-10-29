@@ -65,3 +65,11 @@ CyberTrain 本体の #27 に先方(saeki-mototsune)から返信があり、v0.3.
 - **生成コントローラの `DB.with` は `Cybertrain::DB.with` と書く。** トップレベルのクラスから裸の `DB` は引けず、この Spinel では `NameError: uninitialized constant SessionsController::DB` で全リクエストが 500 になった(2026.09.12 では定数の解決が緩く、動いていた)。ライブラリ内の `DB` は `module Cybertrain` の中にあるので問題ない。
 - 直した後: 改札 `spin test` 9/9(2026.09.12 でも 9/9)、`script/check-installer` 通過、カンバンは本番ビルドで `script/verify` 42/42。Web バイナリに SMTP(OpenSSL)を入れる構成も 42/42 でメール 2 通着信。
 - 前に書いた「`require "openssl"` を先頭に置かないとビルドが止まる」は、この Spinel では起きなかった(`cybertrain/postal/smtp_factory` を `cybertrain/kaisatsu/full` の後に置いてビルドが通り、42/42、`GET /login` は約 16,000 件/秒、失敗 0)。
+
+### CyberTrain v0.3.1 / Spinel 2026.10.27.7020 での確認(2026-10-29)
+
+CyberTrain 本体の #90 が、v0.3.1 が固定する Spinel 2026.10.27.7020(matz/spinel#10415)で直った。`Cybertrain::DB.with` ブロックの値が、アプリのクラスの値でもそのまま使える。
+
+- `spin.toml` の `cybertrain` を `ref = "v0.3.1"` にした。改札 `spin test` は回避策を入れたままで 9/9。
+- **回避策を外した。** 「ブロックの前に仮の値を入れ、ブロックの中で代入する」形(上の v0.3.0 の節)をやめ、`Cybertrain::DB.with { |conn| ... }` の値をそのまま返す・`if` に使う形に戻した(生成コントローラのテンプレート 8 か所と `test/gate_chain.rb`)。外した後も `spin test` は 9/9。
+- 残るもの: 生成コントローラの `Cybertrain::DB.with`(裸の `DB` は引けない)と、ブロックの中で `request` / `ctx` / `params` が使えない点は、この修正とは別の話で、そのまま。

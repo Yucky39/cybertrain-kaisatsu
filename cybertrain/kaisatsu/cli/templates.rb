@@ -337,14 +337,9 @@ module Cybertrain
                   now = Time.now.to_i
                   # Everything the block needs is a local first: inside a Cybertrain::DB.with block
                   # `self` is not the controller under Spinel, so request/ctx/params would not resolve.
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = Cybertrain::Kaisatsu::LoginResult.new("none", "", "")
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.authenticator.login(conn, email, password, ip, now)
+                    Accounts.authenticator.login(conn, email, password, ip, now)
                   end
-                  outcome
                 end
 
                 def sign_out_now
@@ -501,26 +496,16 @@ module Cybertrain
 
                 def token_still_valid?(token)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = false
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.password_reset.token_valid?(conn, token, now)
+                    Accounts.password_reset.token_valid?(conn, token, now)
                   end
-                  outcome
                 end
 
                 def finish_reset(token, password)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = Cybertrain::Kaisatsu::ResetOutcome.new("none", "")
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.password_reset.complete_reset(conn, token, password, now)
+                    Accounts.password_reset.complete_reset(conn, token, password, now)
                   end
-                  outcome
                 end
               end
             EOS_KAISATSU
@@ -612,26 +597,16 @@ module Cybertrain
 
                 def token_still_valid?(token)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = false
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.email_verification.token_valid?(conn, token, now)
+                    Accounts.email_verification.token_valid?(conn, token, now)
                   end
-                  outcome
                 end
 
                 def confirm(token)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = Cybertrain::Kaisatsu::VerifyOutcome.new("none")
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.email_verification.complete_verification(conn, token, now)
+                    Accounts.email_verification.complete_verification(conn, token, now)
                   end
-                  outcome
                 end
               end
             EOS_KAISATSU
@@ -726,38 +701,23 @@ module Cybertrain
                 # is not the controller under Spinel.
                 def ask_for_change(user_id, new_email, password)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = Cybertrain::Kaisatsu::ChangeRequestOutcome.new("none")
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.email_change.request_change(conn, user_id, new_email, password, now)
+                    Accounts.email_change.request_change(conn, user_id, new_email, password, now)
                   end
-                  outcome
                 end
 
                 def token_still_valid?(token)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = false
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.email_change.token_valid?(conn, token, now)
+                    Accounts.email_change.token_valid?(conn, token, now)
                   end
-                  outcome
                 end
 
                 def confirm(token)
                   now = Time.now.to_i
-                  # Declared first, then assigned inside the block: the value of a
-                  # Cybertrain::DB.with block is untyped, and a method call on it fails
-                  # at run time on Spinel 2026.10.26.7019.
-                  outcome = Cybertrain::Kaisatsu::ChangeOutcome.new("none")
                   Cybertrain::DB.with do |conn|
-                    outcome = Accounts.email_change.complete_change(conn, token, now)
+                    Accounts.email_change.complete_change(conn, token, now)
                   end
-                  outcome
                 end
               end
             EOS_KAISATSU

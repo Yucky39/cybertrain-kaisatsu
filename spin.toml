@@ -3,4 +3,4 @@ name = "cybertrain-kaisatsu"
 version = "0.0.1"
 
 [dependencies]
-cybertrain = { git = "https://github.com/saeki-mototsune/cybertrain", ref = "v0.3.0" }
+cybertrain = { git = "https://github.com/saeki-mototsune/cybertrain", ref = "v0.3.1" }
