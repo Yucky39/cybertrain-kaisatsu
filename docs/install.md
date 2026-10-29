@@ -8,7 +8,7 @@ cybertrain db migrate
 cybertrain server
 ```
 
-`--path` を省略すると、`spin.toml` の依存は GitHub のタグ `v0.0.1` を指す(`--ref` で別のタグやブランチも指定できる)。
+`--path` を省略すると、`spin.toml` の依存は GitHub のタグ `v0.0.2` を指す(`--ref` で別のタグやブランチも指定できる)。
 
 ### リバースプロキシの後ろに置くとき
 
@@ -36,6 +36,7 @@ cybertrain server
 - `spin.toml`: `cybertrain-kaisatsu` の依存を追加。
 - `config/app.rb`: 先頭に `require "cybertrain/kaisatsu/full"`。
 - `app/controllers/application_controller.rb`: `before_action { |c| Cybertrain::Kaisatsu::Gate.resolve(c.ctx) }`(毎リクエスト、セッション ID を DB で確認する)と、`signed_in?` / `current_user_id` / `require_login`。
+  ログイン中のユーザー ID は署名付き Cookie にも写されるので、`ApplicationController` を継承しない(`Gate.resolve` を通らない)コントローラでは、失効したセッションがログイン済みに見えることがある。認証が要るコントローラは必ず `ApplicationController` を継承するか、自分で `Gate.resolve` を呼ぶ。
 - `config/routes.rb`: 17 本のルート(足りない分だけを足す)。
 
 既存のファイルが想定の形でないときは、`MANUAL` と表示される。上の内容を手で足す。
